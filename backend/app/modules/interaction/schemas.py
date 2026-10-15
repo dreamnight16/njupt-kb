@@ -98,6 +98,8 @@ class CorrectionCreate(_InputModel):
     resource_id: uuid.UUID
     version_id: uuid.UUID
     description: str = Field(min_length=1, max_length=2000)
+    suggested_course_id: uuid.UUID | None = None
+    suggested_resource_type: ResourceType | None = None
 
     @field_validator("description")
     @classmethod
@@ -114,12 +116,19 @@ class CorrectionStatusUpdate(_InputModel):
     fixed_version_id: uuid.UUID | None = None
 
 
+class ClassificationFix(_InputModel):
+    expected_revision: int = Field(ge=1)
+    resolution_note: str = Field(min_length=1, max_length=2000)
+
+
 class CorrectionItem(BaseModel):
     id: uuid.UUID
     resource_id: uuid.UUID
     version_id: uuid.UUID
     submitter_id: uuid.UUID
     description: str
+    suggested_course_id: uuid.UUID | None = None
+    suggested_resource_type: ResourceType | None = None
     status: CorrectionStatus
     resolution_note: str | None = None
     fixed_version_id: uuid.UUID | None = None

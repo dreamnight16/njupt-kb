@@ -81,6 +81,8 @@ class UserProfile(Base, UUIDPrimaryKey, Timestamped):
     )
     display_name: Mapped[str] = mapped_column(String(80), nullable=False)
     avatar_url: Mapped[str | None] = mapped_column(String(500), nullable=True)
+    gender: Mapped[str | None] = mapped_column(String(30), nullable=True)
+    bio: Mapped[str | None] = mapped_column(String(500), nullable=True)
     # 学院/专业归属 catalog 模块，这里只保存引用，不复制目录事实。
     college_id: Mapped[uuid.UUID | None] = mapped_column(
         ForeignKey("colleges.id"), nullable=True

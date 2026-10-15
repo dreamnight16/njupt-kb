@@ -14,7 +14,12 @@ import {
   listCorrections,
   updateCorrectionStatus,
   type CorrectionItem,
+  applyClassificationFix,
 } from '@/lib/api/interaction';
+import { getResource } from '@/lib/api/content';
+import { getCourse } from '@/lib/api/catalog';
+import { RESOURCE_TYPE_LABELS } from '@/lib/api/types';
+import { isAdmin, useAuthStore } from '@/stores/authStore';
 import { isUuid, formatDateTime } from '@/lib/utils';
 
 type CorrectionStatus = 'open' | 'accepted' | 'rejected' | 'fixed';
@@ -113,10 +118,10 @@ export default function AdminCorrectionsPage() {
                 </div>
                 <Button
                   variant="primary"
-                  disabled={item.status !== 'open'}
+                  disabled={item.status !== 'open' && item.status !== 'accepted'}
                   onClick={() => setActive(item)}
                 >
-                  {item.status === 'open' ? '处理' : '已处理'}
+                  {item.status === 'open' || item.status === 'accepted' ? '处理' : '已处理'}
                 </Button>
               </div>
             </li>
@@ -154,15 +159,25 @@ function CorrectionModal({
   const [status, setStatus] = useState<'accepted' | 'rejected' | 'fixed'>('accepted');
   const [note, setNote] = useState('');
   const [fixedVersionId, setFixedVersionId] = useState('');
+  const user = useAuthStore(s => s.user);
+  const classification = !!(correction.suggested_course_id || correction.suggested_resource_type);
+  const resource = useQuery({ queryKey: ['correction-resource', correction.resource_id], queryFn: () => getResource(correction.resource_id), enabled: classification });
+  const course = useQuery({ queryKey: ['correction-course', correction.suggested_course_id], queryFn: () => getCourse(correction.suggested_course_id!), enabled: !!correction.suggested_course_id });
+  const [apply, setApply] = useState(false);
 
   const mutation = useMutation({
-    mutationFn: () =>
-      updateCorrectionStatus(correction.id, {
+    mutationFn: () => {
+      if (apply) {
+        if (!resource.data || !note.trim()) throw new Error('请等待资料加载并填写处理说明');
+        return applyClassificationFix(correction.id, resource.data.revision, note.trim());
+      }
+      return updateCorrectionStatus(correction.id, {
         status,
         resolution_note: note.trim() || undefined,
         fixed_version_id:
           status === 'fixed' && fixedVersionId.trim() ? fixedVersionId.trim() : undefined,
-      }),
+      });
+    },
     onSuccess: () => {
       toast.success('纠错工单已处理');
       onChanged();
@@ -184,6 +199,12 @@ function CorrectionModal({
         }}
       >
         <p className="text-sm text-text-secondary">{correction.description}</p>
+        {classification && <div className="space-y-2 border border-divider p-3 text-sm">
+          <p>建议课程：{correction.suggested_course_id ? course.data?.name || correction.suggested_course_id : '保持不变'}</p>
+          <p>建议类型：{correction.suggested_resource_type ? RESOURCE_TYPE_LABELS[correction.suggested_resource_type] : '保持不变'}</p>
+          {isAdmin(user) && <label className="flex items-start gap-2"><input type="checkbox" checked={apply} disabled={!resource.data || !!resource.error} onChange={e => setApply(e.target.checked)} />采纳建议并修复分类（同步关闭工单、通知提交者）</label>}
+          {resource.error && <p role="alert">{describeError(resource.error).message}</p>}
+        </div>}
         <p className="text-xs text-text-secondary">
           资源{' '}
           <Link
@@ -200,6 +221,7 @@ function CorrectionModal({
           处理结论
           <select
             value={status}
+            disabled={apply}
             onChange={(event) => setStatus(event.target.value as typeof status)}
             className="mt-1 min-h-11 w-full border border-control-border bg-surface px-3 text-sm text-text-primary focus:border-brand focus:outline-2 focus:outline-offset-1 focus:outline-focus"
           >

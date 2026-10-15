@@ -18,6 +18,7 @@ x-backend-env: &backend-env
   S3_SECRET_ACCESS_KEY: ${MINIO_ROOT_PASSWORD:-njupt-dev-secret}
   S3_BUCKET_QUARANTINE: njupt-quarantine
   S3_BUCKET_PRIVATE: njupt-private
+  S3_BUCKET_PUBLIC: njupt-public
   S3_FORCE_PATH_STYLE: "true"
   CORS_ORIGINS: '["http://localhost:3000"]'
   PUBLIC_BASE_URL: http://localhost:3000
@@ -86,8 +87,10 @@ services:
       mc alias set local http://minio:9000 ${MINIO_ROOT_USER:-njupt} ${MINIO_ROOT_PASSWORD:-njupt-dev-secret} &&
       mc mb --ignore-existing local/njupt-quarantine &&
       mc mb --ignore-existing local/njupt-private &&
+      mc mb --ignore-existing local/njupt-public &&
       mc anonymous set none local/njupt-quarantine &&
-      mc anonymous set none local/njupt-private
+      mc anonymous set none local/njupt-private &&
+      mc anonymous set download local/njupt-public
       "
     restart: "no"
 

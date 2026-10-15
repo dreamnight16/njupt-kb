@@ -60,6 +60,8 @@ export interface CorrectionItem {
   version_id: string;
   submitter_id: string;
   description: string;
+  suggested_course_id?: string | null;
+  suggested_resource_type?: ResourceType | null;
   status: string;
   resolution_note: string | null;
   fixed_version_id: string | null;
@@ -203,9 +205,15 @@ export async function createCorrection(payload: {
   resource_id: string;
   version_id: string;
   description: string;
+  suggested_course_id?: string;
+  suggested_resource_type?: ResourceType;
 }): Promise<CorrectionItem> {
   const { data } = await api.post<CorrectionItem>('/corrections', payload);
   return data;
+}
+
+export async function applyClassificationFix(id: string, expectedRevision: number, note: string): Promise<CorrectionItem> {
+  return (await api.post<CorrectionItem>(`/admin/corrections/${id}/classification`, { expected_revision: expectedRevision, resolution_note: note })).data;
 }
 
 export async function listMyCorrections(

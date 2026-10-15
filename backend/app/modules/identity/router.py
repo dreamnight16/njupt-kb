@@ -6,7 +6,7 @@
 
 from __future__ import annotations
 
-from fastapi import APIRouter, Depends, Query, Request, Response, status
+from fastapi import APIRouter, Depends, File, Query, Request, Response, UploadFile, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import settings
@@ -212,6 +212,25 @@ async def update_me(
 ) -> MeResponse:
     return await service.update_me(
         db, user=user, payload=payload.model_dump(exclude_unset=True), request_id=request_id
+    )
+
+
+@router.post("/me/avatar", response_model=MeResponse)
+async def upload_avatar(
+    file: UploadFile = File(...),
+    user: User = Depends(get_current_user),
+    _session: Session = Depends(current_session),
+    db: AsyncSession = Depends(get_db),
+    request_id: str = Depends(get_request_id),
+) -> MeResponse:
+    # 读取上限 +1 字节即可判定超限，避免把任意大小文件读进内存。
+    data = await file.read(settings.AVATAR_MAX_SIZE_BYTES + 1)
+    return await service.update_avatar(
+        db,
+        user=user,
+        data=data,
+        content_type=file.content_type or "",
+        request_id=request_id,
     )
 
 

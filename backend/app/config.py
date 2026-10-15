@@ -61,6 +61,10 @@ class Settings(BaseSettings):
     S3_SECRET_ACCESS_KEY: str = "njupt-dev-secret"
     S3_BUCKET_QUARANTINE: str = "njupt-quarantine"
     S3_BUCKET_PRIVATE: str = "njupt-private"
+    # 头像等公开静态资源桶（设计文档 §43：avatars 走 CDN）。
+    S3_BUCKET_PUBLIC: str = "njupt-public"
+    # 公开资源的永久访问前缀（CDN 或对外可读的桶地址）；留空时按 endpoint + bucket 拼装。
+    S3_PUBLIC_BASE_URL: str | None = None
     S3_FORCE_PATH_STYLE: bool = True
     S3_PRESIGN_UPLOAD_SECONDS: int = 900
     S3_PRESIGN_DOWNLOAD_SECONDS: int = 60
@@ -76,6 +80,12 @@ class Settings(BaseSettings):
             "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
             "application/vnd.openxmlformats-officedocument.presentationml.presentation",
         ]
+    )
+
+    # --- 头像：直接上传到公开桶，不需要走隔离区扫描（§14.2、§43）---
+    AVATAR_MAX_SIZE_BYTES: int = 2 * 1024 * 1024
+    ALLOWED_AVATAR_MIME: list[str] = Field(
+        default_factory=lambda: ["image/png", "image/jpeg", "image/webp"]
     )
 
     # --- 内容安全检查（§13.1：扫描不可用不得默认 passed）---

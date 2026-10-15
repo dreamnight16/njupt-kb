@@ -15,6 +15,7 @@ from __future__ import annotations
 import uuid
 from collections.abc import Sequence
 
+
 from sqlalchemy import Select, and_, case, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -502,3 +503,13 @@ async def _offering_teachers(
             TeacherBrief(teacher_id=teacher_id, display_name=display_name, role=role)
         )
     return out
+
+
+async def classification_catalog(db: AsyncSession) -> list[dict]:
+    """Active course identities and aliases for filename suggestions; never merge names."""
+    courses = list((await db.execute(select(Course).where(Course.status == CourseStatus.ACTIVE.value))).scalars())
+    aliases: dict[uuid.UUID, list[str]] = {}
+    for alias in (await db.execute(select(CourseAlias))).scalars():
+        aliases.setdefault(alias.course_id, []).append(alias.alias)
+    return [{"id": str(c.id), "name": c.name, "code": c.code,
+             "aliases": aliases.get(c.id, [])} for c in courses]

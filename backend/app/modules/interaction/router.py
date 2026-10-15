@@ -14,7 +14,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.deps import get_current_user, get_db, get_optional_user, get_request_id
 from app.core.enums import CorrectionStatus, ResourceType
 from app.core.pagination import CursorPage
-from app.core.permissions import CORRECTION_HANDLE, require
+from app.core.permissions import CATALOG_MANAGE, CORRECTION_HANDLE, require
 from app.modules.interaction import service
 from app.modules.interaction.schemas import (
     CommentCreate,
@@ -22,6 +22,7 @@ from app.modules.interaction.schemas import (
     CorrectionCreate,
     CorrectionItem,
     CorrectionStatusUpdate,
+    ClassificationFix,
     FavoriteItem,
     FollowItem,
     FollowResult,
@@ -226,6 +227,8 @@ async def create_correction(
         resource_id=payload.resource_id,
         version_id=payload.version_id,
         description=payload.description,
+        suggested_course_id=payload.suggested_course_id,
+        suggested_resource_type=payload.suggested_resource_type,
     )
 
 
@@ -272,6 +275,19 @@ async def update_correction_status(
 
 
 # --- 求资料（§20.2）---
+
+
+@router.post("/admin/corrections/{correction_id}/classification", response_model=CorrectionItem)
+async def apply_classification_fix(
+    correction_id: uuid.UUID, payload: ClassificationFix,
+    user=Depends(require(CATALOG_MANAGE, CORRECTION_HANDLE)),
+    db: AsyncSession = Depends(get_db), request_id: str = Depends(get_request_id),
+):
+    return await service.apply_classification_fix(
+        db, correction_id=correction_id, actor_id=user.id,
+        expected_revision=payload.expected_revision, resolution_note=payload.resolution_note,
+        request_id=request_id,
+    )
 
 
 @router.post("/requests", response_model=RequestCreateResult)

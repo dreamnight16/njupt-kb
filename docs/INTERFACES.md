@@ -156,6 +156,16 @@ async def confirm_payment(db: AsyncSession, *, channel: str, payload: dict) -> P
 # 只接受验签通过的通知；重复回调不重复授予权益（§24.3）。
 ```
 
+## beta5 分类与纠错扩展
+
+- `catalog.service.classification_catalog(db) -> list[dict]`：有效课程 ID、名称、代码、别名；同名保留独立身份。
+- `POST /admin/imports/classify`：`names`（1–50 个、文件名最多 300 字符），返回匹配依据、候选课程、建议类型和需确认标志；需要 `catalog.manage`。
+- `POST /admin/imports/drafts`：沿用 `ResourceCreate` / `ResourceCreatedOut`，每项独立幂等，需要 `catalog.manage` 与 `resource.submit`。上传及提交仍走原接口。
+- `POST /corrections` 增加可选 `suggested_course_id`、`suggested_resource_type`；仅允许当前公开版本且需有元数据权限。
+- `POST /admin/corrections/{id}/classification`：`expected_revision`、`resolution_note`；需要 `catalog.manage` 与 `correction.handle`。事务内调用 `content.service.correct_classification` 校验公开版本与修订号，更正资源分类，随后标记工单已修复并通知。过期快照返回 409。
+- `GET/PATCH /me` 增加可选 `gender`、`bio`。头像使用不带账号密码的 HTTPS 地址，现有 `avatar_url` 继续可清空；新增字段仅通过本人接口返回。
+- `POST /me/avatar`：`multipart/form-data` 单文件字段 `file`，仅接受 PNG/JPEG/WebP 且不超过 `AVATAR_MAX_SIZE_BYTES`（默认 2 MiB）。按真实字节用 Pillow 校验格式，写入公开桶 `S3_BUCKET_PUBLIC` 并返回更新后的 `MeResponse`；地址由 `S3_PUBLIC_BASE_URL`（留空时回退 `S3_PUBLIC_ENDPOINT_URL` + 桶名）拼装。头像不走隔离区扫描，也不能用它替代资料文件上传。
+
 ## ai
 
 ```python

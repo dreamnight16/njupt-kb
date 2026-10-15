@@ -18,6 +18,7 @@ import {
 } from 'lucide-react';
 
 import { Button } from '@/components/ui/Button';
+import { Avatar } from '@/components/common/Avatar';
 import { canReview, useAuthStore } from '@/stores/authStore';
 
 const mainNav = [
@@ -110,9 +111,7 @@ export function AppHeader() {
                   aria-haspopup="menu"
                   className="flex min-h-11 items-center gap-2 px-2 text-sm text-text-primary hover:bg-canvas"
                 >
-                  <span className="grid h-8 w-8 place-items-center bg-ink text-sm font-medium text-on-ink">
-                    {user.display_name?.charAt(0) || 'U'}
-                  </span>
+                  <Avatar url={user.avatar_url} name={user.display_name} />
                   <ChevronDown className="h-4 w-4 text-text-secondary" aria-hidden="true" />
                   <span className="sr-only">账号菜单</span>
                 </button>
@@ -134,6 +133,7 @@ export function AppHeader() {
                       )}
                     </div>
                     <MenuLink href="/me/resources" icon={BookOpen} label="我的资料" />
+                    <MenuLink href="/me/profile" icon={UserCog} label="个人资料" />
                     <MenuLink href="/me/favorites" icon={Heart} label="我的收藏" />
                     <MenuLink href="/me/follows" icon={BookOpen} label="我的关注" />
                     <MenuLink href="/me/notifications" icon={Bell} label="通知" />

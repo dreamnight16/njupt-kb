@@ -32,6 +32,8 @@ export interface MeResponse {
   status: AccountStatus;
   display_name: string;
   avatar_url: string | null;
+  gender?: 'male' | 'female' | 'nonbinary' | 'undisclosed' | null;
+  bio?: string | null;
   email_verified: boolean;
   /** 校园身份校验方案确定前恒为 false，不宣称完成官方学生身份认证。 */
   school_verified: boolean;
@@ -46,6 +48,8 @@ export interface MeResponse {
 export interface MeUpdateRequest {
   display_name?: string | null;
   avatar_url?: string | null;
+  gender?: MeResponse['gender'];
+  bio?: string | null;
   college_id?: string | null;
   major_id?: string | null;
   enrollment_year?: number | null;
@@ -118,6 +122,14 @@ export async function fetchMe(): Promise<MeResponse | null> {
 
 export async function updateMe(payload: MeUpdateRequest): Promise<MeResponse> {
   const { data } = await api.patch<MeResponse>('/me', payload);
+  return data;
+}
+
+/** 头像直接上传到后端公开存储，成功返回更新后的个人资料。 */
+export async function uploadAvatar(file: File): Promise<MeResponse> {
+  const form = new FormData();
+  form.append('file', file);
+  const { data } = await api.post<MeResponse>('/me/avatar', form);
   return data;
 }
 

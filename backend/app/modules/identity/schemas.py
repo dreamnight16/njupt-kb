@@ -7,8 +7,9 @@ from __future__ import annotations
 
 import uuid
 from datetime import datetime
+from typing import Literal
 
-from pydantic import BaseModel, EmailStr, Field
+from pydantic import BaseModel, EmailStr, Field, HttpUrl, field_validator
 
 
 class RegisterRequest(BaseModel):
@@ -70,6 +71,8 @@ class MeResponse(BaseModel):
     status: str
     display_name: str
     avatar_url: str | None = None
+    gender: str | None = None
+    bio: str | None = None
     email_verified: bool
     # 校园身份校验方案确定前恒为 False，不宣称完成官方学生身份认证（D03、§15.1）。
     school_verified: bool
@@ -86,10 +89,22 @@ class MeUpdateRequest(BaseModel):
 
     display_name: str | None = Field(default=None, max_length=80)
     avatar_url: str | None = Field(default=None, max_length=500)
+    gender: Literal["male", "female", "nonbinary", "undisclosed"] | None = None
+    bio: str | None = Field(default=None, max_length=500)
     college_id: uuid.UUID | None = None
     major_id: uuid.UUID | None = None
     enrollment_year: int | None = Field(default=None, ge=1900, le=2100)
     preferences: dict | None = None
+
+    @field_validator("avatar_url")
+    @classmethod
+    def validate_avatar(cls, value: str | None) -> str | None:
+        if not value:
+            return None
+        url = HttpUrl(value)
+        if url.scheme != "https" or url.username or url.password:
+            raise ValueError("头像需要不含账号密码的 HTTPS 图片地址")
+        return str(url)
 
 
 class SessionItem(BaseModel):

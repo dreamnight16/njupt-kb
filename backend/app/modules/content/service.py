@@ -43,6 +43,7 @@ from app.core.enums import (
     FreshnessStatus,
     JobType,
     PublicationStatus,
+    ResourceType,
     ReviewStatus,
     RightsBasis,
     ScanStatus,
@@ -368,6 +369,38 @@ async def reassign_resource_course(
 # --------------------------------------------------------------------------- #
 # 内部辅助
 # --------------------------------------------------------------------------- #
+async def correct_classification(
+    db, *, resource_id, version_id, course_id, resource_type,
+    expected_revision, actor_id, reason, request_id,
+):
+    resource = await get_resource(db, resource_id)
+    if resource.published_version_id != version_id:
+        raise Conflict("公开版本已变化，请重新核对纠错", code="STALE_VERSION")
+    values = {"revision": Resource.revision + 1}
+    before = {"course_id": str(resource.course_id), "resource_type": resource.resource_type,
+              "offering_id": str(resource.offering_id) if resource.offering_id else None}
+    if course_id is not None:
+        from app.modules.catalog.service import get_course
+        course = await get_course(db, course_id)
+        if course.status != "active":
+            raise InvalidInput("请选择有效课程")
+        values["course_id"] = course_id
+        if course_id != resource.course_id:
+            values["offering_id"] = None
+    if resource_type is not None:
+        values["resource_type"] = ResourceType(resource_type).value
+    result = await db.execute(update(Resource).where(
+        Resource.id == resource_id, Resource.revision == expected_revision,
+        Resource.published_version_id == version_id,
+    ).values(**values))
+    if result.rowcount != 1:
+        raise Conflict("资料已更新，请刷新后重试", code="STALE_REVISION")
+    await record_audit(db, actor_id=actor_id, action="resource.classification_corrected",
+                       object_type="resource", object_id=resource_id, before=before,
+                       after={k: str(v) for k, v in values.items() if k != "revision"},
+                       reason=reason, request_id=request_id)
+
+
 def _version_out(version: ResourceVersion) -> VersionOut:
     return VersionOut(
         id=version.id,

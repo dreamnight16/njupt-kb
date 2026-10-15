@@ -23,8 +23,9 @@ from app.core.enums import (
     DomainEventType,
     NotificationType,
     RequestStatus,
+    ResourceType,
 )
-from app.core.errors import Forbidden, InvalidInput, NotFound
+from app.core.errors import Conflict, Forbidden, InvalidInput, NotFound
 from app.core.events import emit_event
 from app.core.pagination import (
     CursorPage,
@@ -520,6 +521,8 @@ def _correction_item(correction: Correction) -> CorrectionItem:
         version_id=correction.version_id,
         submitter_id=correction.submitter_id,
         description=correction.description,
+        suggested_course_id=correction.suggested_course_id,
+        suggested_resource_type=correction.suggested_resource_type,
         status=CorrectionStatus(correction.status),
         resolution_note=correction.resolution_note,
         fixed_version_id=correction.fixed_version_id,
@@ -537,6 +540,8 @@ async def create_correction(
     resource_id: uuid.UUID,
     version_id: uuid.UUID,
     description: str,
+    suggested_course_id: uuid.UUID | None = None,
+    suggested_resource_type: ResourceType | None = None,
 ) -> CorrectionItem:
     """纠错工单绑定版本；新版本修复后由管理员关联工单并通知提交者（§20.2）。"""
     from app.modules.content.service import assert_visible, get_resource, get_version
@@ -546,6 +551,18 @@ async def create_correction(
     version = await get_version(db, version_id)
     if version.resource_id != resource_id:
         raise InvalidInput("版本不属于该资源", details={"version_id": str(version_id)})
+    from app.modules.identity.service import get_user
+    from app.modules.access.service import authorize
+    from app.core.enums import Capability
+
+    user = await get_user(db, user_id)
+    await authorize(db, user=user, resource_id=resource_id, version_id=version_id,
+                    capability=Capability.READ_METADATA)
+    if resource.published_version_id != version_id:
+        raise InvalidInput("只能对当前公开版本提交纠错")
+    if suggested_course_id is not None:
+        from app.modules.catalog.service import get_course
+        await get_course(db, suggested_course_id)
 
     correction = Correction(
         resource_id=resource_id,
@@ -553,6 +570,8 @@ async def create_correction(
         submitter_id=user_id,
         description=description,
         status=CorrectionStatus.OPEN.value,
+        suggested_course_id=suggested_course_id,
+        suggested_resource_type=suggested_resource_type.value if suggested_resource_type else None,
     )
     db.add(correction)
     await db.flush()
@@ -650,7 +669,7 @@ async def update_correction_status(
 ) -> CorrectionItem:
     """管理员处理纠错工单。主动纠正错误获得正向认可，不惩罚被纠错的贡献者（§20.2、§37）。"""
     correction = (
-        await db.execute(select(Correction).where(Correction.id == correction_id))
+        await db.execute(select(Correction).where(Correction.id == correction_id).with_for_update())
     ).scalar_one_or_none()
     if correction is None:
         raise NotFound("纠错工单不存在")
@@ -663,6 +682,8 @@ async def update_correction_status(
             raise InvalidInput("修复版本不属于该资源", details={"fixed_version_id": str(fixed_version_id)})
 
     previous = CorrectionStatus(correction.status)
+    if previous == status:
+        return _correction_item(correction)
     correction.status = status.value
     if resolution_note is not None:
         correction.resolution_note = resolution_note
@@ -686,6 +707,7 @@ async def update_correction_status(
     rewardable = (CorrectionStatus.ACCEPTED, CorrectionStatus.FIXED)
     if status in rewardable and previous not in rewardable:
         await _reward_correction(db, correction)
+    if status != previous and status != CorrectionStatus.OPEN:
         await _notify_correction_result(db, correction, status)
 
     await emit_event(
@@ -697,7 +719,31 @@ async def update_correction_status(
         dedupe_key=f"correction.resolved:{correction.id}:{status.value}",
     )
     await db.flush()
+    await db.refresh(correction)
     return _correction_item(correction)
+
+
+async def apply_classification_fix(db, *, correction_id, actor_id, expected_revision, resolution_note, request_id):
+    from app.modules.content.service import correct_classification
+
+    correction = (await db.execute(select(Correction).where(
+        Correction.id == correction_id).with_for_update())).scalar_one_or_none()
+    if correction is None:
+        raise NotFound("纠错工单不存在")
+    if correction.status not in ("open", "accepted"):
+        raise Conflict("该工单已结案")
+    if correction.suggested_course_id is None and correction.suggested_resource_type is None:
+        raise InvalidInput("该工单没有分类建议")
+    await correct_classification(
+        db, resource_id=correction.resource_id, version_id=correction.version_id,
+        course_id=correction.suggested_course_id, resource_type=correction.suggested_resource_type,
+        expected_revision=expected_revision, actor_id=actor_id, reason=resolution_note,
+        request_id=request_id,
+    )
+    return await update_correction_status(
+        db, correction_id=correction_id, actor_id=actor_id, status=CorrectionStatus.FIXED,
+        resolution_note=resolution_note, fixed_version_id=None, request_id=request_id,
+    )
 
 
 async def _reward_correction(db: AsyncSession, correction: Correction) -> None:

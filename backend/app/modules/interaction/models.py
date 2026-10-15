@@ -148,6 +148,8 @@ class Correction(Base, UUIDPrimaryKey, Timestamped):
     status: Mapped[str] = mapped_column(
         String(20), nullable=False, default=CorrectionStatus.OPEN.value
     )
+    suggested_course_id: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("courses.id"), nullable=True)
+    suggested_resource_type: Mapped[str | None] = mapped_column(String(30), nullable=True)
     resolution_note: Mapped[str | None] = mapped_column(Text, nullable=True)
     # 新版本修复后关联工单，用于通知提交者（§20.2）。
     fixed_version_id: Mapped[uuid.UUID | None] = mapped_column(

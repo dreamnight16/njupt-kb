@@ -6,6 +6,8 @@ import toast from 'react-hot-toast';
 import { Download, Eye, Flag, Heart, Star } from 'lucide-react';
 
 import { Notice } from '@/components/common/Notice';
+import { CoursePicker } from '@/components/catalog/CoursePicker';
+import { RESOURCE_TYPE_LABELS, RESOURCE_TYPE_ORDER, type ResourceType } from '@/lib/api/types';
 import { Button } from '@/components/ui/Button';
 import { Modal } from '@/components/ui/Modal';
 import { createDownloadGrant, createPreviewGrant } from '@/lib/api/access';
@@ -73,7 +75,9 @@ export function ResourceActions({
   const [favorited, setFavorited] = useState<boolean | null>(null);
   const [favoritePending, setFavoritePending] = useState(false);
   const [reportOpen, setReportOpen] = useState(false);
-  const [reportType, setReportType] = useState<'report' | 'correction'>('report');
+  const [reportType, setReportType] = useState<'report' | 'correction' | 'classification'>('report');
+  const [suggestedCourse, setSuggestedCourse] = useState('');
+  const [suggestedType, setSuggestedType] = useState<ResourceType | ''>('');
   const [reportReason, setReportReason] = useState<ReportReasonCode>('copyright');
   const [reportDetail, setReportDetail] = useState('');
   const [myScore, setMyScore] = useState<number | null>(null);
@@ -98,12 +102,15 @@ export function ResourceActions({
 
   const reportMutation = useMutation({
     mutationFn: () => {
-      if (reportType === 'correction') {
+      if (reportType !== 'report') {
         if (!versionId) throw new Error('该资料没有可提交纠错的公开版本');
+        if (reportType === 'classification' && !suggestedCourse && !suggestedType) throw new Error('请选择建议课程或资料类型');
         return createCorrection({
           resource_id: resourceId,
           version_id: versionId,
           description: reportDetail.trim(),
+          suggested_course_id: reportType === 'classification' ? suggestedCourse || undefined : undefined,
+          suggested_resource_type: reportType === 'classification' ? suggestedType || undefined : undefined,
         }).then(() => 'correction' as const);
       }
       return createReport({
@@ -116,6 +123,8 @@ export function ResourceActions({
     onSuccess: (kind) => {
       setReportOpen(false);
       setReportDetail('');
+      setSuggestedCourse('');
+      setSuggestedType('');
       toast.success(kind === 'correction' ? '纠错已提交，会进入独立工单处理' : '举报已提交，会进入独立工单处理');
     },
     onError: (error) => toast.error(describeError(error).message),
@@ -366,7 +375,7 @@ export function ResourceActions({
               toast.error('登录后才可以提交');
               return;
             }
-            if (reportType === 'correction' && !reportDetail.trim()) {
+            if (reportType !== 'report' && !reportDetail.trim()) {
               toast.error('请填写纠错说明');
               return;
             }
@@ -385,8 +394,13 @@ export function ResourceActions({
             >
               <option value="report">举报：版权、隐私、安全等问题</option>
               <option value="correction">纠错：内容错误、缺页、版本不符</option>
+              <option value="classification">分类错误：课程归属或资料类型不符</option>
             </select>
           </div>
+          {reportType === 'classification' && <div className="space-y-3">
+            <CoursePicker label="建议课程（可选）" value={suggestedCourse} onChange={setSuggestedCourse} />
+            <label className="block text-sm">建议资料类型（可选）<select aria-label="建议资料类型" value={suggestedType} onChange={e => setSuggestedType(e.target.value as ResourceType | '')} className="min-h-11 w-full border border-control-border bg-surface px-3"><option value="">不修改资料类型</option>{RESOURCE_TYPE_ORDER.map(type => <option key={type} value={type}>{RESOURCE_TYPE_LABELS[type]}</option>)}</select></label>
+          </div>}
           {reportType === 'report' && (
             <div>
               <label htmlFor="report-reason" className="mb-1 block text-sm font-medium text-text-primary">
@@ -408,7 +422,7 @@ export function ResourceActions({
           )}
           <div>
             <label htmlFor="report-detail" className="mb-1 block text-sm font-medium text-text-primary">
-              {reportType === 'correction' ? '纠错说明（必填）' : '补充说明（可选）'}
+              {reportType !== 'report' ? '纠错说明（必填）' : '补充说明（可选）'}
             </label>
             <textarea
               id="report-detail"

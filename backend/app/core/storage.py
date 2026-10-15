@@ -167,6 +167,28 @@ class ObjectStorage:
             except (ClientError, BotoCoreError) as exc:
                 raise DependencyUnavailable("对象存储暂时不可用，请稍后重试") from exc
 
+    async def put_public_object(self, storage_key: str, data: bytes, content_type: str) -> None:
+        """公开桶写入：头像等可匿名读取的静态资源（§43）。内容类型由调用方校验后传入。"""
+        async with self._semaphore:
+            try:
+                await asyncio.to_thread(
+                    self._client.put_object,
+                    Bucket=settings.S3_BUCKET_PUBLIC,
+                    Key=storage_key,
+                    Body=data,
+                    ContentType=content_type,
+                )
+            except (ClientError, BotoCoreError) as exc:
+                raise DependencyUnavailable("对象存储暂时不可用，请稍后重试") from exc
+
+    def public_url(self, storage_key: str) -> str:
+        """公开对象的永久地址；优先使用 CDN/对外前缀，否则回退到 endpoint + 桶名。"""
+        base = settings.S3_PUBLIC_BASE_URL or (
+            f"{(settings.S3_PUBLIC_ENDPOINT_URL or settings.S3_ENDPOINT_URL).rstrip('/')}"
+            f"/{settings.S3_BUCKET_PUBLIC}"
+        )
+        return f"{base.rstrip('/')}/{storage_key}"
+
     async def promote(self, storage_key: str, *, target_bucket: str) -> None:
         """隔离区对象转入私有区：扫描通过后才允许（§16）。"""
         async with self._semaphore:
@@ -232,7 +254,11 @@ class ObjectStorage:
     async def ensure_buckets(self) -> list[str]:
         """确保配置的桶存在，返回已创建/已存在的桶名。开发与自建部署使用。"""
         created: list[str] = []
-        for bucket in (settings.S3_BUCKET_QUARANTINE, settings.S3_BUCKET_PRIVATE):
+        for bucket in (
+            settings.S3_BUCKET_QUARANTINE,
+            settings.S3_BUCKET_PRIVATE,
+            settings.S3_BUCKET_PUBLIC,
+        ):
             try:
                 async with self._semaphore:
                     await asyncio.to_thread(self._client.head_bucket, Bucket=bucket)

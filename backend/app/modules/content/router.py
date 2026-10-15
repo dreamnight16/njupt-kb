@@ -14,7 +14,8 @@ from fastapi import APIRouter, Depends, Request, status
 from app.core.deps import get_current_user, get_db, get_optional_user, get_request_id
 from app.core.enums import ResourceType
 from app.core.idempotency import lookup, normalize_key, remember
-from app.core.permissions import RESOURCE_REVISE, RESOURCE_SUBMIT, require
+from app.core.permissions import CATALOG_MANAGE, RESOURCE_REVISE, RESOURCE_SUBMIT, require
+from app.modules.content.classification import ClassificationIn, classify
 from app.modules.content import service
 from app.modules.content.schemas import (
     PublicationOut,
@@ -37,6 +38,25 @@ router = APIRouter(tags=["content"])
 
 from app.modules.content.management_router import router as management_router
 router.include_router(management_router)
+
+
+@router.post("/admin/imports/classify")
+async def classify_imports(payload: ClassificationIn, user=Depends(require(CATALOG_MANAGE)), db=Depends(get_db)):
+    return {"items": await classify(db, payload.names)}
+
+
+@router.post("/admin/imports/drafts", response_model=ResourceCreatedOut, status_code=201)
+async def create_import_draft(
+    payload: ResourceCreate, request: Request,
+    user=Depends(require(CATALOG_MANAGE, RESOURCE_SUBMIT)), db=Depends(get_db),
+    request_id: str = Depends(get_request_id),
+):
+    # Each row is separately idempotent, so failed rows can be retried independently.
+    async def action():
+        result = await service.create_resource(db, user=user, payload=payload, request_id=request_id)
+        return result.model_dump(mode="json")
+    return await _idempotent(db, scope="content.import_draft", request=request,
+                             payload=payload.model_dump(mode="json"), actor_id=user.id, action=action)
 
 
 async def _idempotent(

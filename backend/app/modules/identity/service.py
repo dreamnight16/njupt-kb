@@ -605,6 +605,8 @@ async def me_summary(db: AsyncSession, *, user: User) -> MeResponse:
         status=user.status,
         display_name=display_name_of(user),
         avatar_url=profile.avatar_url if profile else None,
+        gender=profile.gender if profile else None,
+        bio=profile.bio if profile else None,
         email_verified=user.email_verified_at is not None,
         school_verified=await is_school_verified(db, user.id),
         email_verified_at=user.email_verified_at,
@@ -616,21 +618,27 @@ async def me_summary(db: AsyncSession, *, user: User) -> MeResponse:
     )
 
 
-async def update_me(
-    db: AsyncSession, *, user: User, payload: dict, request_id: str | None
-) -> MeResponse:
+async def _ensure_profile(db: AsyncSession, user: User) -> UserProfile:
     profile = getattr(user, "profile", None)
     if profile is None:
         profile = UserProfile(user_id=user.id, display_name=display_name_of(user))
         db.add(profile)
         await db.flush()
+        user.profile = profile
+    return profile
+
+
+async def update_me(
+    db: AsyncSession, *, user: User, payload: dict, request_id: str | None
+) -> MeResponse:
+    profile = await _ensure_profile(db, user)
 
     if "display_name" in payload:
         name = (payload["display_name"] or "").strip()
         if not name:
             raise InvalidInput("昵称不能为空")
         profile.display_name = name[:80]
-    for field in ("avatar_url", "college_id", "major_id", "enrollment_year"):
+    for field in ("avatar_url", "gender", "bio", "college_id", "major_id", "enrollment_year"):
         if field in payload:
             setattr(profile, field, payload[field])
     if "preferences" in payload and payload["preferences"] is not None:
@@ -643,7 +651,62 @@ async def update_me(
         object_id=user.id,
         actor_id=user.id,
         # UUID 等值转字符串，保证审计 JSON 可序列化。
-        after={key: str(value) for key, value in payload.items()},
+        after={"changed_fields": sorted(payload)},
+        request_id=request_id,
+    )
+    return await me_summary(db, user=user)
+
+
+# 声明类型 -> (Pillow 格式名, 存储后缀)。头像直传公开桶，不进入隔离区扫描（§14.2、§43）。
+_AVATAR_FORMATS = {
+    "image/png": ("PNG", ".png"),
+    "image/jpeg": ("JPEG", ".jpg"),
+    "image/webp": ("WEBP", ".webp"),
+}
+
+
+async def update_avatar(
+    db: AsyncSession, *, user: User, data: bytes, content_type: str, request_id: str | None
+) -> MeResponse:
+    """校验并直接上传头像到公开桶，返回新地址；与资料字段编辑相互独立。"""
+    from io import BytesIO
+
+    from PIL import Image, UnidentifiedImageError
+
+    from app.core.storage import build_storage_key, storage
+
+    mime = (content_type or "").split(";")[0].strip().lower()
+    spec = _AVATAR_FORMATS.get(mime)
+    if spec is None:
+        raise InvalidInput("头像仅支持 PNG、JPEG 或 WebP")
+    if not data:
+        raise InvalidInput("头像文件为空")
+    if len(data) > settings.AVATAR_MAX_SIZE_BYTES:
+        limit_mib = settings.AVATAR_MAX_SIZE_BYTES // (1024 * 1024)
+        raise InvalidInput(f"头像不能超过 {limit_mib} MiB")
+    # 上传声明的类型不可信：按真实字节确认是可解码图片，避免把任意内容放进公开桶。
+    try:
+        with Image.open(BytesIO(data)) as image:
+            image.verify()
+            detected = (image.format or "").upper()
+    except (UnidentifiedImageError, OSError) as exc:
+        raise InvalidInput("头像不是有效的图片") from exc
+    if detected != spec[0]:
+        raise InvalidInput("头像内容与文件类型不一致")
+
+    profile = await _ensure_profile(db, user)
+    key = build_storage_key(f"avatars/{user.id}", f"avatar{spec[1]}")
+    await storage.put_public_object(key, data, mime)
+    previous = profile.avatar_url
+    profile.avatar_url = storage.public_url(key)
+    await record_audit(
+        db,
+        action="identity.avatar_updated",
+        object_type="user",
+        object_id=user.id,
+        actor_id=user.id,
+        before={"avatar_url": previous},
+        after={"avatar_url": profile.avatar_url},
         request_id=request_id,
     )
     return await me_summary(db, user=user)
