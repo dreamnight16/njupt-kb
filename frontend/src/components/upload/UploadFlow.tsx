@@ -17,6 +17,7 @@ import {
   getUpload,
   putFileToStorage,
   submitVersion,
+  updateVersion,
 } from '@/lib/api/content';
 import {
   RESOURCE_TYPE_LABELS,
@@ -86,8 +87,9 @@ export function UploadFlow() {
   const [rightsSource, setRightsSource] = useState('');
   const [rightsAuthor, setRightsAuthor] = useState('');
   const [rightsLicense, setRightsLicense] = useState('');
-  const [created, setCreated] = useState<{ resourceId: string; versionId: string } | null>(null);
+  const [created, setCreated] = useState<{ resourceId: string; versionId: string; revision: number } | null>(null);
   const [saving, setSaving] = useState(false);
+  const [savedFingerprint, setSavedFingerprint] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
 
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -211,6 +213,9 @@ export function UploadFlow() {
     () => entries.filter((entry) => entry.fileId && entry.phase === 'done'),
     [entries],
   );
+  const formFingerprint = JSON.stringify([course?.id, resourceType, title, description,
+    changeSummary, tagsInput, previewDisabled, rightsBasis, rightsSource, rightsAuthor,
+    rightsLicense, uploadableFiles.map(entry => entry.fileId)]);
 
   const canSave =
     !!course && title.trim().length > 0 && uploadableFiles.length > 0 && !!rightsBasis;
@@ -233,8 +238,7 @@ export function UploadFlow() {
     }
     setSaving(true);
     try {
-      const result = await createResource(
-        {
+      const payload = {
           course_id: course.id,
           resource_type: resourceType,
           title: title.trim(),
@@ -243,7 +247,7 @@ export function UploadFlow() {
           preview_disabled: previewDisabled,
           files: uploadableFiles.map((entry, index) => ({
             file_id: entry.fileId as string,
-            purpose: 'primary',
+            purpose: index === 0 ? 'primary' as const : 'attachment' as const,
             display_order: index,
           })),
           rights: {
@@ -257,11 +261,16 @@ export function UploadFlow() {
             .split(',')
             .map((tag) => tag.trim())
             .filter(Boolean),
-        },
-        newKey(),
-      );
-      setCreated({ resourceId: result.resource_id, versionId: result.version_id });
+        };
+      if (created) {
+        const version = await updateVersion(created.resourceId, created.versionId, { ...payload, revision: created.revision });
+        setCreated({ ...created, revision: version.revision });
+      } else {
+        const result = await createResource(payload, newKey());
+        setCreated({ resourceId: result.resource_id, versionId: result.version_id, revision: 1 });
+      }
       toast.success('草稿已保存');
+      setSavedFingerprint(formFingerprint);
     } catch (error) {
       toast.error(describeError(error).message);
     } finally {
@@ -270,7 +279,7 @@ export function UploadFlow() {
   }
 
   async function handleSubmit() {
-    if (!created) return;
+    if (!created || savedFingerprint !== formFingerprint) return;
     setSubmitting(true);
     try {
       await submitVersion(created.resourceId, created.versionId, newKey());
@@ -303,7 +312,7 @@ export function UploadFlow() {
                 {course.college_name ?? '归属学院待确认'}
               </p>
             </div>
-            <Button variant="secondary" onClick={() => setCourse(null)}>
+            <Button variant="secondary" disabled={!!created} onClick={() => setCourse(null)}>
               重新选择
             </Button>
           </div>
@@ -360,6 +369,7 @@ export function UploadFlow() {
           </label>
           <select
             id="resource-type"
+            disabled={!!created}
             value={resourceType}
             onChange={(event) => setResourceType(event.target.value as ResourceType)}
             className="min-h-11 w-full border border-control-border bg-surface px-3 text-sm text-text-primary focus:border-brand focus:outline-2 focus:outline-offset-1 focus:outline-focus md:max-w-xs"
@@ -609,7 +619,7 @@ export function UploadFlow() {
             variant="primary"
             onClick={handleSubmit}
             isLoading={submitting}
-            disabled={!created || !allScansPassed}
+            disabled={!created || !allScansPassed || savedFingerprint !== formFingerprint}
           >
             提交审核
           </Button>
@@ -619,6 +629,7 @@ export function UploadFlow() {
             请先保存草稿；保存成功后才能提交审核。
           </p>
         )}
+        {created && savedFingerprint !== formFingerprint && <p className="mt-2 text-xs text-text-secondary">内容已修改，请重新保存草稿后提交。</p>}
         {created && !allScansPassed && (
           <p className="mt-2 text-xs text-text-secondary">
             仍有文件未通过安全检查，暂时不能提交审核。草稿已保存，可以稍后再来提交。

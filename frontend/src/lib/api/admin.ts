@@ -120,6 +120,28 @@ export async function listReports(params: {
   return data;
 }
 
+export interface ReportEventOut {
+  id: string;
+  report_id: string;
+  actor_id: string | null;
+  from_status: ReportStatus | null;
+  to_status: ReportStatus;
+  note: string | null;
+  evidence: Record<string, unknown> | null;
+  created_at: string;
+}
+
+export async function listReportEvents(
+  reportId: string,
+  cursor?: string | null,
+): Promise<CursorPage<ReportEventOut>> {
+  const { data } = await api.get<CursorPage<ReportEventOut>>(
+    `/admin/reports/${reportId}/events`,
+    { params: { cursor: cursor || undefined } },
+  );
+  return data;
+}
+
 export async function appendReportEvent(
   reportId: string,
   payload: ReportEventIn,

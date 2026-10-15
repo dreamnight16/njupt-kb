@@ -53,7 +53,7 @@ ALL_PERMISSIONS: frozenset[str] = frozenset(
 
 # §15 权限表：普通审核员可以批准或驳回，但不能调整财务、授予管理员权限或批量删除文件。
 ROLE_PERMISSIONS: dict[Role, frozenset[str]] = {
-    Role.USER: frozenset(),
+    Role.USER: frozenset({RESOURCE_SUBMIT, RESOURCE_REVISE, RESOURCE_WITHDRAW}),
     Role.CONTRIBUTOR: frozenset({RESOURCE_SUBMIT, RESOURCE_REVISE, RESOURCE_WITHDRAW}),
     Role.REVIEWER: frozenset(
         {
@@ -95,8 +95,8 @@ def require(*permissions: str) -> Callable[[object], object]:
     from app.core.deps import get_current_user
 
     async def _dependency(user: "User" = Depends(get_current_user)) -> "User":
-        if user.status == AccountStatus.BANNED:
-            raise Forbidden("账号已被封禁")
+        if user.status != AccountStatus.ACTIVE:
+            raise Forbidden("当前账号不能执行此操作，请完成邮箱验证或联系管理员")
         missing = [p for p in permissions if not has_permission(user, p)]
         if missing:
             raise Forbidden("没有执行该操作的权限", details={"missing": missing})

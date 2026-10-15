@@ -13,6 +13,7 @@ x-backend-env: &backend-env
   REDIS_URL: redis://redis:6379/0
   SECRET_KEY: ${SECRET_KEY:-dev-only-secret-not-for-production-use}
   S3_ENDPOINT_URL: http://minio:9000
+  S3_PUBLIC_ENDPOINT_URL: ${S3_PUBLIC_ENDPOINT_URL:-http://localhost:9000}
   S3_ACCESS_KEY_ID: ${MINIO_ROOT_USER:-njupt}
   S3_SECRET_ACCESS_KEY: ${MINIO_ROOT_PASSWORD:-njupt-dev-secret}
   S3_BUCKET_QUARANTINE: njupt-quarantine
@@ -62,6 +63,7 @@ services:
     environment:
       MINIO_ROOT_USER: ${MINIO_ROOT_USER:-njupt}
       MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:-njupt-dev-secret}
+      MINIO_API_CORS_ALLOW_ORIGIN: http://localhost:3000
     ports:
       - "9000:9000"
       - "9001:9001"
@@ -112,7 +114,7 @@ services:
   worker:
     build:
       context: ./backend
-      dockerfile: Dockerfile
+      dockerfile: Dockerfile.worker
     command: celery -A app.workers.celery_app:celery_app worker -Q njupt -l info --concurrency=2
     environment:
       <<: *backend-env
@@ -146,7 +148,7 @@ services:
       context: ./frontend
       dockerfile: Dockerfile.dev
     environment:
-      NEXT_PUBLIC_API_BASE: http://api:8000
+      API_INTERNAL_URL: http://api:8000
       NEXT_PUBLIC_SITE_URL: http://localhost:3000
       WATCHPACK_POLLING: "true"
     ports:
@@ -161,7 +163,6 @@ services:
 
   clamav:
     image: clamav/clamav:stable
-    profiles: ["scan"]
     ports:
       - "3310:3310"
     restart: unless-stopped

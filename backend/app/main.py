@@ -14,6 +14,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy import text
 
 from app.config import settings
+from app import __version__
 from app.core.errors import install_error_handlers
 from app.core.logging import configure_logging
 from app.core.middleware import CSRFMiddleware, RequestContextMiddleware
@@ -44,7 +45,7 @@ async def lifespan(app: FastAPI):
 
 app = FastAPI(
     title=settings.APP_NAME,
-    version="0.0.1bate2",
+    version=__version__,
     docs_url=f"{settings.API_PREFIX}/docs" if settings.ENV != "prod" else None,
     redoc_url=None,
     openapi_url=f"{settings.API_PREFIX}/openapi.json" if settings.ENV != "prod" else None,
@@ -73,7 +74,7 @@ health_router = APIRouter(tags=["health"])
 @health_router.get("/health/live")
 async def health_live() -> dict[str, str]:
     """进程存活。"""
-    return {"status": "ok", "service": "njupt-kb-api", "version": "0.0.1bate2"}
+    return {"status": "ok", "service": "njupt-kb-api", "version": __version__}
 
 
 @health_router.get("/health/ready")

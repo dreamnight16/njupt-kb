@@ -603,6 +603,41 @@ async def list_my_corrections(
     )
 
 
+async def list_corrections(
+    db: AsyncSession,
+    *,
+    status: CorrectionStatus | None,
+    cursor: str | None,
+    limit: int | None,
+) -> CursorPage[CorrectionItem]:
+    """管理端纠错工单列表；与 list_my_corrections 的区别只是不限定提交人。"""
+    page_size = normalize_page_size(limit)
+    stmt = select(Correction)
+    if status is not None:
+        stmt = stmt.where(Correction.status == status.value)
+    decoded = _decode_time_cursor(cursor)
+    if decoded is not None:
+        created_at, last_id = decoded
+        stmt = stmt.where(
+            or_(
+                Correction.created_at < created_at,
+                (Correction.created_at == created_at) & (Correction.id < last_id),
+            )
+        )
+    stmt = stmt.order_by(Correction.created_at.desc(), Correction.id.desc()).limit(page_size + 1)
+    rows = list((await db.execute(stmt)).scalars().all())
+    has_more = len(rows) > page_size
+    rows = rows[:page_size]
+    next_cursor = (
+        encode_cursor({"t": rows[-1].created_at.isoformat(), "i": str(rows[-1].id)})
+        if has_more and rows
+        else None
+    )
+    return CursorPage(
+        items=[_correction_item(c) for c in rows], next_cursor=next_cursor, has_more=has_more
+    )
+
+
 async def update_correction_status(
     db: AsyncSession,
     *,
@@ -930,6 +965,7 @@ async def _course_ids_of_university(db: AsyncSession, university_id: uuid.UUID) 
 async def search(
     db: AsyncSession,
     *,
+    user=None,
     q: str | None,
     university_id: uuid.UUID | None,
     curriculum_id: uuid.UUID | None,
@@ -1022,7 +1058,6 @@ async def search(
         params["cur_id"] = last_id
         where.append(f"({rank_expr}, r.course_id, r.id) > (:cur_rank, :cur_course_id, :cur_id)")
 
-    params["limit"] = page_size + 1
     sql = f"""
         SELECT r.id, r.course_id, r.resource_type, r.freshness_status,
                r.published_version_id, rv.title, {rank_expr} AS rank
@@ -1031,12 +1066,20 @@ async def search(
         {offering_join}
         WHERE {' AND '.join(where)}
         ORDER BY {rank_expr} ASC, r.course_id ASC, r.id ASC
-        LIMIT :limit
     """
+    from sqlalchemy import Uuid, Integer, String
+    from app.modules.access.visibility import visible_resource_ids
+
+    # Filter before LIMIT so hidden resources cannot create holes or leak via pagination.
     stmt = text(sql)
     if expanding:
         stmt = stmt.bindparams(*(bindparam(name, expanding=True) for name in expanding))
-    rows = list((await db.execute(stmt, params)).all())
+    source = stmt.columns(id=Uuid(), course_id=Uuid(), resource_type=String(),
+                          freshness_status=String(), published_version_id=Uuid(),
+                          title=String(), rank=Integer()).subquery()
+    query = (select(source).where(source.c.id.in_(visible_resource_ids(user)))
+             .order_by(source.c.rank, source.c.course_id, source.c.id).limit(page_size + 1))
+    rows = list((await db.execute(query, params)).all())
 
     has_more = len(rows) > page_size
     rows = rows[:page_size]

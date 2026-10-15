@@ -11,8 +11,8 @@ import uuid
 from fastapi import APIRouter, Depends, Query, Response, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.core.deps import get_current_user, get_db, get_request_id
-from app.core.enums import ResourceType
+from app.core.deps import get_current_user, get_db, get_optional_user, get_request_id
+from app.core.enums import CorrectionStatus, ResourceType
 from app.core.pagination import CursorPage
 from app.core.permissions import CORRECTION_HANDLE, require
 from app.modules.interaction import service
@@ -52,10 +52,12 @@ async def search_resources(
     cursor: str | None = None,
     limit: int | None = Query(default=None, ge=1, le=100),
     db: AsyncSession = Depends(get_db),
+    user=Depends(get_optional_user),
 ) -> CursorPage[SearchItem]:
     """只返回已发布资源；查询失败返回 5xx，不吞成空列表（§39 A21）。"""
     return await service.search(
         db,
+        user=user,
         q=q,
         university_id=university_id,
         curriculum_id=curriculum_id,
@@ -235,6 +237,19 @@ async def list_my_corrections(
     db: AsyncSession = Depends(get_db),
 ) -> CursorPage[CorrectionItem]:
     return await service.list_my_corrections(db, user_id=user.id, cursor=cursor, limit=limit)
+
+
+@router.get("/admin/corrections", response_model=CursorPage[CorrectionItem])
+async def list_corrections(
+    status: CorrectionStatus | None = Query(default=None),
+    cursor: str | None = None,
+    limit: int | None = Query(default=None, ge=1, le=100),
+    user=Depends(require(CORRECTION_HANDLE)),
+    db: AsyncSession = Depends(get_db),
+) -> CursorPage[CorrectionItem]:
+    return await service.list_corrections(
+        db, status=status, cursor=cursor, limit=limit
+    )
 
 
 @router.post("/admin/corrections/{correction_id}/status", response_model=CorrectionItem)

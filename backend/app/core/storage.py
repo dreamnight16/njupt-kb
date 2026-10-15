@@ -67,6 +67,16 @@ class ObjectStorage:
             ),
         )
         self._semaphore = asyncio.Semaphore(settings.S3_MAX_CONCURRENCY)
+        self._public_client = self._client
+        if settings.S3_PUBLIC_ENDPOINT_URL:
+            self._public_client = boto3.client(
+                "s3", endpoint_url=settings.S3_PUBLIC_ENDPOINT_URL,
+                region_name=settings.S3_REGION,
+                aws_access_key_id=settings.S3_ACCESS_KEY_ID,
+                aws_secret_access_key=settings.S3_SECRET_ACCESS_KEY,
+                config=BotoConfig(signature_version="s3v4", s3={
+                    "addressing_style": "path" if settings.S3_FORCE_PATH_STYLE else "auto"}),
+            )
 
     # --- 内部 ---
     async def _run(self, fn, /, *args, **kwargs):
@@ -85,7 +95,7 @@ class ObjectStorage:
         bucket = bucket or settings.S3_BUCKET_QUARANTINE
         expires_in = settings.S3_PRESIGN_UPLOAD_SECONDS
         url = await self._run(
-            self._client.generate_presigned_url,
+            self._public_client.generate_presigned_url,
             "put_object",
             Params={"Bucket": bucket, "Key": storage_key, "ContentType": content_type},
             ExpiresIn=expires_in,
@@ -202,7 +212,7 @@ class ObjectStorage:
                 f"attachment; filename*=UTF-8''{quote(file_name)}"
             )
         url = await self._run(
-            self._client.generate_presigned_url,
+            self._public_client.generate_presigned_url,
             "get_object",
             Params=params,
             ExpiresIn=expires_in,

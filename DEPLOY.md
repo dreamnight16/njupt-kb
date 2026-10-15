@@ -1,5 +1,41 @@
 # 南邮知识库 — 生产部署指南
 
+> beta3 更新：当前服务名为 `api`、`web`、`postgres`、`worker`、`beat`、`redis`、`minio`、`clamav`。
+> 下文历史说明保留供迁移参考；实际部署以本节和当前 Compose 为准，不执行旧版 `backend`、`db`、`seed.py` 命令。
+
+## beta3 部署与验证
+
+1. 配置 `.env`：数据库、随机密钥、邮件、域名及私有存储。`CORS_ORIGINS` 使用 JSON 数组。
+2. `PUBLIC_BASE_URL` 是浏览器访问的 HTTPS 地址；`API_INTERNAL_URL` 是 Web 容器访问 API 的内部地址。
+3. `S3_ENDPOINT_URL` 用于服务端读写；`S3_PUBLIC_ENDPOINT_URL` 用于签名 URL，必须能被浏览器访问。两者可以相同；签名后不能再手工替换域名。
+4. 配置存储端 CORS，允许站点来源的 PUT/GET 与上传所需 Content-Type；原件与隔离桶保持私有。
+5. Nginx 当前文件仅启用 HTTP 示例。生产部署必须实际配置 TLS 入口与证书；`COOKIE_SECURE=true` 需要 HTTPS。仅映射 443 端口不会自动启用 TLS。
+
+```bash
+docker compose -f docker-compose.prod.yml config --quiet
+docker compose -f docker-compose.prod.yml build
+docker compose -f docker-compose.prod.yml up -d --wait postgres redis minio clamav
+docker compose -f docker-compose.prod.yml run --rm --no-deps api alembic upgrade head
+# 确认私有桶已由运维创建；如需应用创建，单独授予所需权限并执行初始化。
+docker compose -f docker-compose.prod.yml up -d api worker beat web nginx
+```
+
+使用托管对象存储时，按实际配置调整 MinIO 服务及准备步骤。迁移失败必须停止发布。
+不默认运行 `seed_demo`；演示数据含演示账号，仅用于隔离开发环境。目录样本导入使用
+`docker compose exec api python -m scripts.seed_catalog`，导入前确认内容与目标数据库。
+
+上线后检查 `/api/v1/health/live`、`/api/v1/health/ready`，再实际验证上传、检查、预览、审核和下载。
+检查 `worker`、`beat` 与 `clamav` 日志；健康检查通过不代表任务已完成。
+beta3 没有新增表结构，已有 beta2 数据仍使用 `0001_initial`；新建资源会创建保守访问策略：
+元数据公开、登录用户预览、原件按显式权益授权。不要在部署时自动将历史私有资料改为公开。
+
+本地回归命令：`cd backend && python -m unittest discover -s tests -v`；测试依赖见 `requirements-dev.txt`。
+浏览器契约检查见 `backend/tests/browser_beta3.py`；真实 Docker 联调仍需在具备 Docker 的环境完成。
+
+---
+
+## 历史部署说明（旧版，勿直接照搬）
+
 ## 架构概览
 
 ```

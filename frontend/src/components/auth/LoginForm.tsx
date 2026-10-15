@@ -107,7 +107,7 @@ export function LoginForm() {
           <p className="text-sm text-text-secondary">
             输入注册邮箱，我们会发送重置说明（不区分该邮箱是否已注册）。
           </p>
-          <div className="mt-3">
+          <div className="mt-3 flex flex-wrap items-center gap-3">
             <Button
               variant="secondary"
               onClick={() => {
@@ -121,6 +121,12 @@ export function LoginForm() {
             >
               发送重置说明
             </Button>
+            <Link
+              href="/reset-password"
+              className="text-sm text-text-secondary underline underline-offset-2 hover:text-text-primary"
+            >
+              已有重置令牌
+            </Link>
           </div>
         </div>
       )}

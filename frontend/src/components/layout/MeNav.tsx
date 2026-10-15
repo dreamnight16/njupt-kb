@@ -6,6 +6,7 @@ import { usePathname } from 'next/navigation';
 const items = [
   { href: '/me/resources', label: '我的资料' },
   { href: '/me/favorites', label: '我的收藏' },
+  { href: '/me/follows', label: '我的关注' },
   { href: '/me/notifications', label: '通知' },
   { href: '/me/security', label: '账号与安全' },
 ];

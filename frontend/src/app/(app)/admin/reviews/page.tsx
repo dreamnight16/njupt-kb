@@ -117,7 +117,7 @@ export default function AdminReviewsPage() {
                   </p>
                   <div className="mt-2 flex flex-wrap gap-3 text-xs">
                     <Link
-                      href={`/resources/${review.resource_id}`}
+                      href={`/me/resources/${review.resource_id}/versions/${review.version_id}`}
                       className="underline underline-offset-2 text-text-secondary hover:text-text-primary"
                     >
                       查看原件与预览

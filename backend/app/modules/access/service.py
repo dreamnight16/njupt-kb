@@ -12,7 +12,7 @@ import uuid
 from datetime import datetime, timedelta, timezone
 from typing import TYPE_CHECKING
 
-from sqlalchemy import and_, func, or_, select, text
+from sqlalchemy import Uuid, and_, bindparam, func, or_, select, text
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -131,8 +131,9 @@ async def authorize(
             raise NotFound("资源版本不存在")
 
     # 步骤 3：文件安全状态（作者/管理员同样不得绕过）
-    _, resource_file = await _resolve_file(db, version_id=version_id, file_id=file_id)
-    _assert_file_safe(resource_file)
+    if capability is not Capability.READ_METADATA:
+        _, resource_file = await _resolve_file(db, version_id=version_id, file_id=file_id)
+        _assert_file_safe(resource_file)
 
     # 步骤 4：内容来源允许的分发范围
     await _assert_distribution_allowed(db, version_id=version_id, capability=capability)
@@ -194,6 +195,8 @@ async def issue_preview_grant(
     from app.modules.content.service import get_version
 
     version = await get_version(db, version_id)
+    if version.preview_disabled:
+        raise NotFound("作者已关闭该版本的预览", code="PREVIEW_DISABLED")
     _, resource_file = await _resolve_file(db, version_id=version_id, file_id=None)
 
     derivative = await _find_preview_derivative(db, source_file_id=resource_file.id)
@@ -224,6 +227,23 @@ async def issue_preview_grant(
     )
 
 
+async def issue_inspection_grant(db: AsyncSession, *, user, resource_id, version_id, file_id):
+    """Safe original inspection for the author/review work, never a public distribution grant."""
+    from app.modules.content.service import get_resource, get_version
+    resource = await get_resource(db, resource_id)
+    version = await get_version(db, version_id)
+    if version.resource_id != resource.id or not await _management_bypass(
+        db, user=user, resource=resource, version=version
+    ):
+        raise NotFound("文件不存在")
+    await authorize(db, user=user, resource_id=resource_id, version_id=version_id,
+                    file_id=file_id, capability=Capability.READ_FULL)
+    _, file = await _resolve_file(db, version_id=version_id, file_id=file_id)
+    signed = await storage.presign_download(file.storage_key, bucket=settings.S3_BUCKET_PRIVATE,
+                                           file_name=file.original_name)
+    return {"url": signed.url, "expires_at": signed.expires_at}
+
+
 # --------------------------------------------------------------------------
 # 下载授权（§17.2 六步、§29 幂等）
 # --------------------------------------------------------------------------
@@ -245,11 +265,6 @@ async def issue_download_grant(
         "version_id": str(version_id),
         "file_id": str(file_id),
     }
-
-    # 重试：命中同一幂等键且请求摘要一致时返回同一业务授权结果
-    cached = await idem.lookup(db, scope=scope, key=key, payload=payload, actor_id=user.id)
-    if cached is not None:
-        return DownloadGrantResult(**cached)
 
     # 已存在授权记录：在授权许可窗口内重新签发，不自动再次扣额度（§17.2）
     existing = await _grant_by_key(db, user_id=user.id, key=key)
@@ -340,16 +355,7 @@ async def issue_download_grant(
     result = await _sign_download(
         db, grant_id=grant.id, resource_file=resource_file, version_no=version.version_no
     )
-    # 幂等结果与授权在同一事务内提交（§25.1）
-    await idem.remember(
-        db,
-        scope=scope,
-        key=key,
-        payload=payload,
-        actor_id=user.id,
-        response_status=201,
-        response=result.model_dump(mode="json"),
-    )
+    # DownloadGrant 自身保存幂等事实；不缓存会过期的签名链接。
     return result
 
 
@@ -388,15 +394,6 @@ async def _reissue(
     _, resource_file = await _resolve_file(db, version_id=version_id, file_id=file_id)
     result = await _sign_download(
         db, grant_id=grant.id, resource_file=resource_file, version_no=version.version_no
-    )
-    await idem.remember(
-        db,
-        scope=scope,
-        key=key,
-        payload=payload,
-        actor_id=user.id,
-        response_status=200,
-        response=result.model_dump(mode="json"),
     )
     return result
 
@@ -602,6 +599,14 @@ async def get_access_policy(db: AsyncSession, resource_id: uuid.UUID) -> AccessP
     return await _load_policy(db, resource_id)
 
 
+async def initialize_policy(db: AsyncSession, resource_id: uuid.UUID) -> uuid.UUID:
+    """New content starts with explicit model defaults, never implicit public downloads."""
+    policy = AccessPolicy(resource_id=resource_id)
+    db.add(policy)
+    await db.flush()
+    return policy.id
+
+
 # --------------------------------------------------------------------------
 # 内部辅助
 # --------------------------------------------------------------------------
@@ -642,10 +647,7 @@ async def _management_bypass(
         return True
     if has_permission(user, RESOURCE_REVIEW):
         # 审核员仅在工作范围内可见原件（§15）
-        try:
-            from app.modules.moderation.service import can_review
-        except ImportError:
-            return True
+        from app.modules.moderation.service import can_review
         return bool(await can_review(db, user, version.id))
     return False
 
@@ -705,7 +707,7 @@ async def _rights_basis(db: AsyncSession, version_id: uuid.UUID) -> str | None:
             text(
                 "SELECT rights_basis FROM rights_declarations "
                 "WHERE version_id = :version_id ORDER BY declared_at DESC LIMIT 1"
-            ),
+            ).bindparams(bindparam("version_id", type_=Uuid())),
             {"version_id": version_id},
         )
     ).first()
@@ -724,10 +726,11 @@ async def _find_preview_derivative(
             text(
                 "SELECT id, storage_key FROM file_derivatives "
                 "WHERE source_file_id = :source_file_id AND status = 'ready' "
-                "AND kind IN ('watermarked_preview', 'preview_pdf') "
-                "ORDER BY CASE kind WHEN 'watermarked_preview' THEN 0 ELSE 1 END, created_at DESC "
+                "AND kind IN ('watermarked_preview', 'preview_pdf', 'thumbnail') "
+                "ORDER BY CASE kind WHEN 'watermarked_preview' THEN 0 "
+                "WHEN 'preview_pdf' THEN 1 ELSE 2 END, created_at DESC "
                 "LIMIT 1"
-            ),
+            ).bindparams(bindparam("source_file_id", type_=Uuid())),
             {"source_file_id": source_file_id},
         )
     ).first()

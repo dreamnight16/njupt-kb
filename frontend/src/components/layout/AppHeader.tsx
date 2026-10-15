@@ -33,17 +33,15 @@ function isActive(pathname: string, href: string): boolean {
 export function AppHeader() {
   const pathname = usePathname();
   const { user, status, logout } = useAuthStore();
-  const [menuOpen, setMenuOpen] = useState(false);
+  const [menuPath, setMenuPath] = useState<string | null>(null);
+  const menuOpen = menuPath === pathname;
+  const setMenuOpen = (open: boolean) => setMenuPath(open ? pathname : null);
   const menuRef = useRef<HTMLDivElement>(null);
-
-  useEffect(() => {
-    setMenuOpen(false);
-  }, [pathname]);
 
   useEffect(() => {
     function onDocClick(event: MouseEvent) {
       if (menuRef.current && !menuRef.current.contains(event.target as Node)) {
-        setMenuOpen(false);
+        setMenuPath(null);
       }
     }
     document.addEventListener('mousedown', onDocClick);
@@ -105,7 +103,7 @@ export function AppHeader() {
               <div className="relative" ref={menuRef}>
                 <button
                   type="button"
-                  onClick={() => setMenuOpen((open) => !open)}
+                  onClick={() => setMenuOpen(!menuOpen)}
                   aria-expanded={menuOpen}
                   aria-haspopup="menu"
                   className="flex min-h-11 items-center gap-2 px-2 text-sm text-text-primary hover:bg-canvas"

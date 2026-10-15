@@ -84,6 +84,14 @@ class JobTransientError(Exception):
     """处理器确认的临时失败：允许重试（§22.2）。"""
 
 
+class JobOutcomeError(Exception):
+    """处理已完成并保存业务失败结果，需要与任务状态一起提交。"""
+
+    def __init__(self, message: str, failure_class: FailureClass):
+        super().__init__(message)
+        self.failure_class = failure_class
+
+
 def _now() -> datetime:
     return datetime.now(timezone.utc)
 
@@ -107,6 +115,8 @@ def _classify(exc: Exception) -> FailureClass:
     - 明确临时：状态冲突（可等待后重试）、依赖不可用、限流、超时、连接错误。
     - 其他未知异常按「可重试」处理，由 `max_attempts` 兜底，避免一次偶发故障直接丢弃任务。
     """
+    if isinstance(exc, JobOutcomeError):
+        return exc.failure_class
     if isinstance(exc, JobPermanentError):
         return FailureClass.PERMANENT
     if isinstance(exc, JobTransientError):
@@ -284,9 +294,9 @@ async def _handle_file_scan(db: AsyncSession, job: Job) -> None:
         return
     if status == ScanStatus.REJECTED:
         # 检测拒绝属永久结果，不无限重试（§22.2）。
-        raise JobPermanentError("文件安全检查拒绝")
+        raise JobOutcomeError("文件安全检查拒绝", FailureClass.PERMANENT)
     # 检查未能完成（扫描器不可用等）：不得默认通过，属临时故障（§13.1、§30）。
-    raise JobTransientError("文件检查未能完成")
+    raise JobOutcomeError("文件检查未能完成", FailureClass.TRANSIENT)
 
 
 async def _handle_file_derive(db: AsyncSession, job: Job) -> None:
@@ -297,7 +307,7 @@ async def _handle_file_derive(db: AsyncSession, job: Job) -> None:
     if status == DerivativeStatus.READY:
         return
     # 转换失败多为格式不可解析；不无限自动重试，由管理员修复转换器后重试（§13.1、§30）。
-    raise JobPermanentError("预览转换失败")
+    raise JobOutcomeError("预览转换失败", FailureClass.PERMANENT)
 
 
 async def _handle_notification_dispatch(db: AsyncSession, job: Job) -> None:
@@ -362,10 +372,12 @@ async def run_job(job_id: str) -> str:
             job = await db.get(Job, job_uuid)
             return job.status if job is not None else JobStatus.FAILED.value
 
+        claimed_type = claimed.job_type
         try:
             await _execute(db, claimed)
         except Exception as exc:  # noqa: BLE001 - 处理器异常必须在此收敛
-            await db.rollback()
+            if not isinstance(exc, JobOutcomeError):
+                await db.rollback()
             failure = _classify(exc)
             status = await _record_failure(db, job_uuid, exc, failure)
             await db.commit()
@@ -373,7 +385,7 @@ async def run_job(job_id: str) -> str:
                 "job_failed",
                 extra={
                     "job_id": str(job_uuid),
-                    "job_type": claimed.job_type,
+                    "job_type": claimed_type,
                     "failure_class": failure.value,
                     "status": status,
                 },

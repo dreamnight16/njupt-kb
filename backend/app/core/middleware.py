@@ -5,6 +5,7 @@ from __future__ import annotations
 import logging
 import re
 import time
+from urllib.parse import urlsplit
 from collections.abc import Awaitable, Callable
 
 from starlette.middleware.base import BaseHTTPMiddleware
@@ -106,7 +107,17 @@ class CSRFMiddleware(BaseHTTPMiddleware):
         if not origin:
             # 非浏览器客户端（脚本、测试）不发送来源头；这些入口仍受限流保护。
             return True
-        return any(origin.startswith(o.rstrip("/")) for o in settings.CORS_ORIGINS)
+        def site(value: str):
+            try:
+                parsed = urlsplit(value)
+                if parsed.scheme not in {"http", "https"} or not parsed.hostname or parsed.username or parsed.password:
+                    return None
+                return parsed.scheme, parsed.hostname, parsed.port or (443 if parsed.scheme == "https" else 80)
+            except ValueError:
+                return None
+
+        actual = site(origin)
+        return actual is not None and actual in {site(value) for value in settings.CORS_ORIGINS}
 
     @staticmethod
     def _reject(request: Request, code: str, message: str) -> JSONResponse:

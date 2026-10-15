@@ -35,6 +35,9 @@ from app.modules.content.schemas import (
 
 router = APIRouter(tags=["content"])
 
+from app.modules.content.management_router import router as management_router
+router.include_router(management_router)
+
 
 async def _idempotent(
     db,
@@ -110,6 +113,7 @@ async def list_resources(
 ):
     return await service.list_resources(
         db,
+        user=user,
         course_id=course_id,
         college_id=college_id,
         offering_id=offering_id,
@@ -264,7 +268,7 @@ async def list_version_files(
 async def create_upload(
     payload: UploadCreateIn,
     request: Request,
-    user=Depends(get_current_user),
+    user=Depends(require(RESOURCE_SUBMIT)),
     db=Depends(get_db),
 ):
     body = payload.model_dump(mode="json")
@@ -291,7 +295,7 @@ async def create_upload(
 async def complete_upload(
     upload_id: uuid.UUID,
     request: Request,
-    user=Depends(get_current_user),
+    user=Depends(require(RESOURCE_SUBMIT)),
     db=Depends(get_db),
     request_id: str = Depends(get_request_id),
 ):

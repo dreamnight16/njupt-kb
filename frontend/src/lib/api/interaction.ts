@@ -6,6 +6,15 @@ import { api } from './client';
 import type { CourseBrief } from './catalog';
 import type { CursorPage, ResourceType } from './types';
 
+export interface FollowItem {
+  id: string;
+  target_type: 'course' | 'creator';
+  target_id: string;
+  created_at: string;
+  /** 目标摘要：课程为 CourseBrief，创作者为公开昵称；目标缺失时为 null。 */
+  target: Record<string, unknown> | null;
+}
+
 export interface RatingSummary {
   average: number;
   count: number;
@@ -122,6 +131,32 @@ export async function listFavorites(
   return data;
 }
 
+// --- 关注（§20.2）：PUT 设置 / DELETE 取消，与收藏同样避免 toggle 反转 ---
+
+export async function setFollow(
+  targetType: 'course' | 'creator',
+  targetId: string,
+): Promise<void> {
+  await api.put(`/me/follows/${targetType}/${targetId}`);
+}
+
+export async function removeFollow(
+  targetType: 'course' | 'creator',
+  targetId: string,
+): Promise<void> {
+  await api.delete(`/me/follows/${targetType}/${targetId}`);
+}
+
+export async function listFollows(params: {
+  target_type?: 'course' | 'creator';
+  cursor?: string | null;
+} = {}): Promise<CursorPage<FollowItem>> {
+  const { data } = await api.get<CursorPage<FollowItem>>('/me/follows', {
+    params: { ...params, cursor: params.cursor || undefined },
+  });
+  return data;
+}
+
 export async function submitRating(
   resourceId: string,
   versionId: string,
@@ -182,6 +217,32 @@ export async function listMyCorrections(
   return data;
 }
 
+export async function listCorrections(params: {
+  status?: string;
+  cursor?: string | null;
+  limit?: number;
+} = {}): Promise<CursorPage<CorrectionItem>> {
+  const { data } = await api.get<CursorPage<CorrectionItem>>('/admin/corrections', {
+    params: { ...params, cursor: params.cursor || undefined },
+  });
+  return data;
+}
+
+export async function updateCorrectionStatus(
+  correctionId: string,
+  payload: {
+    status: 'accepted' | 'rejected' | 'fixed';
+    resolution_note?: string | null;
+    fixed_version_id?: string | null;
+  },
+): Promise<CorrectionItem> {
+  const { data } = await api.post<CorrectionItem>(
+    `/admin/corrections/${correctionId}/status`,
+    payload,
+  );
+  return data;
+}
+
 export async function createRequest(payload: {
   course_id: string;
   scope?: string | null;
@@ -195,6 +256,7 @@ export async function listRequests(params: {
   course_id?: string;
   status?: string;
   cursor?: string | null;
+  limit?: number;
 } = {}): Promise<CursorPage<RequestItem>> {
   const { data } = await api.get<CursorPage<RequestItem>>('/requests', {
     params: { ...params, cursor: params.cursor || undefined },

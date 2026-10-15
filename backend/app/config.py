@@ -54,6 +54,8 @@ class Settings(BaseSettings):
 
     # --- 对象存储（§16）：私有原件、私有预览、隔离上传区 ---
     S3_ENDPOINT_URL: str = "http://localhost:9000"
+    # 用于浏览器直传/下载的可达地址；签名时使用，不能在签名后替换域名。
+    S3_PUBLIC_ENDPOINT_URL: str | None = None
     S3_REGION: str = "us-east-1"
     S3_ACCESS_KEY_ID: str = "njupt"
     S3_SECRET_ACCESS_KEY: str = "njupt-dev-secret"

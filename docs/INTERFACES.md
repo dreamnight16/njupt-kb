@@ -1,5 +1,24 @@
 # 跨模块接口声明
 
+## beta3 接续增补
+
+- `interaction.service.list_corrections(db, *, status, cursor, limit)`：管理端纠错工单列表，与 `list_my_corrections` 的区别只是不限定提交人。
+- `interaction` 新增 GET `/admin/corrections`（`status` 过滤、游标分页，权限 `correction.handle`）；处理仍走既有 POST `/admin/corrections/{id}/status`。
+- 前端补齐：`/reset-password` 密码找回确认页、`/admin/reports` 投诉工单处理（事件时间线与状态流转）、`/admin/corrections` 纠错工单处理、`/requests` 求资料（列表/新建/关注）、课程页关注按钮与 `/me/follows`。
+- 关注与求资料关注均为幂等设置语义：PUT 设置、DELETE 取消；求资料关注命中未解决需求时合并计数，不重复建单。
+
+## beta3 增补
+
+- `access.visibility.visible_resource_ids(user)` 返回 SQLAlchemy 查询，详情、列表和搜索按同一访问范围处理；列表和搜索在分页前过滤。
+- `content.management.list_my_resources(db, *, user, cursor=None, limit=None)`：当前作者的分页列表。
+- `content.management.list_versions(db, *, user, resource_id)`：作者或有对应审核范围的版本列表。
+- `content.management.get_version_detail(db, *, user, resource_id, version_id)`：指定版本、文件、来源声明与审核意见；返回 `can_edit`。
+- `access.service.issue_inspection_grant(db, *, user, resource_id, version_id, file_id)`：作者或授权审核人员检查安全原件，不产生公开下载权益。
+- `moderation.service.latest_decision_reason(db, version_id)`：查询该快照最近的审核意见。
+- `moderation.service.can_review`：普通审核员必须有对应审核记录，且符合指派范围；不能借审核权限读取未提交草稿。
+- `content` 新增 GET `/me/resources`、GET `/resources/{id}/versions`、GET `/resources/{id}/versions/{vid}`、POST `/resources/{id}/versions/{vid}/files/{fid}/inspection-grants`。
+- 下载幂等事实以 `DownloadGrant` 为准；每次重取链接检查授权后重新签名，不复用缓存签名响应。
+
 只有本文件列出的函数允许被其他模块调用。签名变更必须同步修改本文件与所有调用点。
 调用方式：函数体内局部导入，例如 `from app.modules.access.service import authorize`。
 

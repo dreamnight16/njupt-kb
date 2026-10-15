@@ -510,7 +510,7 @@ async def _next_version_no(db: AsyncSession, resource_id: uuid.UUID) -> int:
 
 
 async def _ensure_owner(resource: Resource, user) -> None:
-    if resource.owner_id != user.id and not _is_manager(user):
+    if resource.owner_id != user.id and user.role != "admin":
         # 私有对象统一 404，避免泄露存在性（§25.1）。
         raise NotFound("资源不存在")
 
@@ -544,6 +544,9 @@ async def create_resource(
     )
     db.add(resource)
     await db.flush()
+
+    from app.modules.access.service import initialize_policy
+    resource.access_policy_id = await initialize_policy(db, resource.id)
 
     version = ResourceVersion(
         resource_id=resource.id,
@@ -766,7 +769,7 @@ async def withdraw_resource(
 ) -> PublicationOut:
     """作者或管理员撤回；撤回不物理删除文件（§13.3）。"""
     resource = await get_resource(db, resource_id)
-    if resource.owner_id != user.id and not has_permission(user, RESOURCE_WITHDRAW):
+    if resource.owner_id != user.id and user.role != "admin":
         raise NotFound("资源不存在")
     if resource.publication_status != PublicationStatus.PUBLISHED.value:
         raise Conflict("资源当前不处于已发布状态，无法撤回", code="NOT_PUBLISHED")
@@ -788,6 +791,9 @@ async def withdraw_resource(
 
 
 async def get_resource_detail(db: AsyncSession, *, user, resource_id: uuid.UUID) -> ResourceDetailOut:
+    from app.modules.access.service import authorize
+    from app.core.enums import Capability
+
     resource = await get_resource(db, resource_id)
     is_owner = bool(user) and user.id == resource.owner_id
     is_public = (
@@ -798,6 +804,9 @@ async def get_resource_detail(db: AsyncSession, *, user, resource_id: uuid.UUID)
         raise NotFound("资源不存在")
 
     version = await published_version(db, resource)
+    if version is not None:
+        await authorize(db, user=user, resource_id=resource.id, version_id=version.id,
+                        capability=Capability.READ_METADATA)
     preview_available = False
     if version is not None and not version.preview_disabled:
         preview_available = await _preview_ready(db, version.id)
@@ -820,6 +829,7 @@ async def get_resource_detail(db: AsyncSession, *, user, resource_id: uuid.UUID)
 async def list_resources(
     db: AsyncSession,
     *,
+    user=None,
     course_id: uuid.UUID | None = None,
     college_id: uuid.UUID | None = None,
     offering_id: uuid.UUID | None = None,
@@ -836,7 +846,12 @@ async def list_resources(
         raise InvalidInput("不支持的排序方式", details={"allowed": ["latest", "oldest"]})
     size = normalize_page_size(limit)
 
-    stmt = select(Resource).where(Resource.publication_status == PublicationStatus.PUBLISHED.value)
+    from app.modules.access.visibility import visible_resource_ids
+
+    stmt = select(Resource).where(
+        Resource.publication_status == PublicationStatus.PUBLISHED.value,
+        Resource.id.in_(visible_resource_ids(user)),
+    )
     if course_id is not None:
         stmt = stmt.where(Resource.course_id == course_id)
     if offering_id is not None:
@@ -867,7 +882,10 @@ async def list_resources(
         pattern = f"%{keyword.strip()}%"
         stmt = stmt.where(
             Resource.id.in_(
-                select(ResourceVersion.resource_id).where(ResourceVersion.title.ilike(pattern))
+                select(ResourceVersion.resource_id).where(
+                    ResourceVersion.id == Resource.published_version_id,
+                    ResourceVersion.title.ilike(pattern),
+                )
             )
         )
 
@@ -950,6 +968,11 @@ async def list_version_files(
     # 历史版本默认仅作者与有权限管理人员可见（§12.1、D08）。
     if not (is_owner or is_public or _is_manager(user)):
         raise NotFound("版本不存在")
+
+    from app.modules.access.service import authorize
+    from app.core.enums import Capability
+    await authorize(db, user=user, resource_id=resource.id, version_id=version.id,
+                    capability=Capability.READ_METADATA)
 
     pairs = await version_files(db, version.id)
     return VersionFilesOut(

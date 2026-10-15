@@ -4,6 +4,7 @@ import { notFound } from 'next/navigation';
 
 import { Notice } from '@/components/common/Notice';
 import { ResourceCard } from '@/components/resource/ResourceCard';
+import { CourseFollowButton } from '@/components/catalog/CourseFollowButton';
 import type { CourseDetail, OfferingItem } from '@/lib/api/catalog';
 import type { ResourceListItem } from '@/lib/api/content';
 import { serverFetch } from '@/lib/api/server';
@@ -104,6 +105,17 @@ export default async function CourseDetailPage({
           <p className="mt-2 text-sm text-on-color">别名：{course.aliases.join('、')}</p>
         )}
       </header>
+
+      {/* 关注与求资料：P2 共建入口，与收藏分开（§20.2）。 */}
+      <div className="flex flex-wrap items-center gap-3">
+        <CourseFollowButton courseId={course.id} />
+        <Link
+          href="/requests"
+          className="inline-flex min-h-11 items-center border border-control-border px-4 text-sm font-medium text-text-primary hover:bg-canvas"
+        >
+          为这门课求资料
+        </Link>
+      </div>
 
       {course.description && (
         <section aria-labelledby="course-intro">

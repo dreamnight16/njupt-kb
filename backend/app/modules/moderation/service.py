@@ -334,15 +334,23 @@ async def get_review(db: AsyncSession, review_id: uuid.UUID) -> Review:
     return review
 
 
+async def latest_decision_reason(db: AsyncSession, version_id: uuid.UUID) -> str | None:
+    return await db.scalar(select(ModerationDecision.reason).where(
+        ModerationDecision.version_id == version_id
+    ).order_by(ModerationDecision.created_at.desc()).limit(1))
+
+
 async def can_review(db: AsyncSession, reviewer: "User", version_id: uuid.UUID) -> bool:
     """审核员是否可审核该版本。作者不能审核自己的提交（§13.3）。"""
     if not has_permission(reviewer, RESOURCE_REVIEW):
         return False
-    review = await _active_review(db, version_id)
-    submitter_id = review.submitter_id if review is not None else await _version_creator(db, version_id)
-    if submitter_id is not None and submitter_id == reviewer.id:
-        return reviewer.role == Role.ADMIN
-    return True
+    if reviewer.role == Role.ADMIN:
+        return True
+    review = await db.scalar(select(Review).where(Review.version_id == version_id)
+                             .order_by(Review.submitted_at.desc()).limit(1))
+    if review is None or review.submitter_id == reviewer.id:
+        return False
+    return review.assigned_reviewer_id is None or review.assigned_reviewer_id == reviewer.id
 
 
 async def decide(

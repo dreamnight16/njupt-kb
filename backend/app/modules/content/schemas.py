@@ -193,3 +193,26 @@ class UploadStatusOut(BaseModel):
     scan_status: ScanStatus | None
     created_at: datetime
     completed_at: datetime | None
+
+
+class ManagedResourceOut(BaseModel):
+    id: uuid.UUID
+    course_id: uuid.UUID
+    publication_status: PublicationStatus
+    revision: int
+    latest_version: VersionOut
+    updated_at: datetime
+
+
+class VersionDetailOut(BaseModel):
+    resource_id: uuid.UUID
+    course_id: uuid.UUID
+    resource_type: ResourceType
+    publication_status: PublicationStatus
+    resource_revision: int
+    version: VersionOut
+    files: list[FileOut]
+    rights: RightsDeclarationIn | None
+    tags: list[str]
+    review_reason: str | None
+    can_edit: bool

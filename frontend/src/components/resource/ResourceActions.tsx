@@ -1,6 +1,6 @@
 'use client';
 
-import { useState } from 'react';
+import { useRef, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import toast from 'react-hot-toast';
 import { Download, Eye, Flag, Heart, Star } from 'lucide-react';
@@ -17,6 +17,7 @@ import {
   type ReportReasonCode,
 } from '@/lib/api/moderation';
 import {
+  createCorrection,
   ratingSummary,
   removeFavorite,
   setFavorite,
@@ -50,7 +51,6 @@ function newIdempotencyKey(): string {
 export function ResourceActions({
   resourceId,
   versionId,
-  versionNo,
   publicationStatus,
   previewAvailable,
   files,
@@ -68,9 +68,12 @@ export function ResourceActions({
 
   const [pendingFileId, setPendingFileId] = useState<string | null>(null);
   const [previewing, setPreviewing] = useState(false);
+  const [previewUrl, setPreviewUrl] = useState<string | null>(null);
+  const downloadKeys = useRef(new Map<string, string>());
   const [favorited, setFavorited] = useState<boolean | null>(null);
   const [favoritePending, setFavoritePending] = useState(false);
   const [reportOpen, setReportOpen] = useState(false);
+  const [reportType, setReportType] = useState<'report' | 'correction'>('report');
   const [reportReason, setReportReason] = useState<ReportReasonCode>('copyright');
   const [reportDetail, setReportDetail] = useState('');
   const [myScore, setMyScore] = useState<number | null>(null);
@@ -94,17 +97,26 @@ export function ResourceActions({
   });
 
   const reportMutation = useMutation({
-    mutationFn: () =>
-      createReport({
+    mutationFn: () => {
+      if (reportType === 'correction') {
+        if (!versionId) throw new Error('该资料没有可提交纠错的公开版本');
+        return createCorrection({
+          resource_id: resourceId,
+          version_id: versionId,
+          description: reportDetail.trim(),
+        }).then(() => 'correction' as const);
+      }
+      return createReport({
         resource_id: resourceId,
         version_id: versionId ?? undefined,
         reason_code: reportReason,
         description: reportDetail.trim() || undefined,
-      }),
-    onSuccess: () => {
+      }).then(() => 'report' as const);
+    },
+    onSuccess: (kind) => {
       setReportOpen(false);
       setReportDetail('');
-      toast.success('举报已提交，会进入独立工单处理');
+      toast.success(kind === 'correction' ? '纠错已提交，会进入独立工单处理' : '举报已提交，会进入独立工单处理');
     },
     onError: (error) => toast.error(describeError(error).message),
   });
@@ -114,7 +126,7 @@ export function ResourceActions({
     setPreviewing(true);
     try {
       const grant = await createPreviewGrant(resourceId, versionId);
-      window.open(grant.preview_url, '_blank', 'noopener,noreferrer');
+      setPreviewUrl(grant.preview_url);
       toast.success(`预览链接有效期至 ${formatDateTime(grant.url_expires_at)}`);
     } catch (error) {
       toast.error(describeError(error).message);
@@ -126,17 +138,19 @@ export function ResourceActions({
   async function handleDownload(file: FileOut) {
     if (!versionId) return;
     setPendingFileId(file.id);
+    if (!downloadKeys.current.has(file.id)) downloadKeys.current.set(file.id, newIdempotencyKey());
     try {
       // 幂等键：重试不会重复占用下载额度。
       const grant = await createDownloadGrant(
         resourceId,
         versionId,
         file.id,
-        newIdempotencyKey(),
+        downloadKeys.current.get(file.id)!,
       );
       window.location.assign(grant.download_url);
       toast.success(`已获得下载授权，链接有效期至 ${formatDateTime(grant.url_expires_at)}`);
     } catch (error) {
+      if (describeError(error).code === 'GRANT_WINDOW_EXPIRED') downloadKeys.current.delete(file.id);
       toast.error(describeError(error).message);
     } finally {
       setPendingFileId(null);
@@ -167,6 +181,10 @@ export function ResourceActions({
 
   return (
     <div className="space-y-6">
+      <Modal isOpen={!!previewUrl} onClose={() => setPreviewUrl(null)} title="资料预览">
+        {previewUrl && <><iframe src={previewUrl} title="获准访问的资料预览" className="h-[65vh] w-full" />
+          <a href={previewUrl} target="_blank" rel="noopener noreferrer" className="mt-3 inline-block underline">在新窗口查看</a></>}
+      </Modal>
       {publicationStatus !== 'published' && (
         <Notice tone="warning" title="该资料当前不是已发布状态">
           可能正在审核、已下架或等待处理。此时不能获取新的预览或下载授权。
@@ -339,32 +357,52 @@ export function ResourceActions({
           onSubmit={(event) => {
             event.preventDefault();
             if (!authed) {
-              toast.error('登录后才可以举报');
+              toast.error('登录后才可以提交');
+              return;
+            }
+            if (reportType === 'correction' && !reportDetail.trim()) {
+              toast.error('请填写纠错说明');
               return;
             }
             reportMutation.mutate();
           }}
         >
           <div>
-            <label htmlFor="report-reason" className="mb-1 block text-sm font-medium text-text-primary">
-              问题类型
+            <label htmlFor="report-type" className="mb-1 block text-sm font-medium text-text-primary">
+              提交类型
             </label>
             <select
-              id="report-reason"
-              value={reportReason}
-              onChange={(event) => setReportReason(event.target.value as ReportReasonCode)}
+              id="report-type"
+              value={reportType}
+              onChange={(event) => setReportType(event.target.value as typeof reportType)}
               className="min-h-11 w-full border border-control-border bg-surface px-3 text-sm text-text-primary focus:border-brand focus:outline-2 focus:outline-offset-1 focus:outline-focus"
             >
-              {Object.entries(REPORT_REASON_LABELS).map(([value, label]) => (
-                <option key={value} value={value}>
-                  {label}
-                </option>
-              ))}
+              <option value="report">举报：版权、隐私、安全等问题</option>
+              <option value="correction">纠错：内容错误、缺页、版本不符</option>
             </select>
           </div>
+          {reportType === 'report' && (
+            <div>
+              <label htmlFor="report-reason" className="mb-1 block text-sm font-medium text-text-primary">
+                问题类型
+              </label>
+              <select
+                id="report-reason"
+                value={reportReason}
+                onChange={(event) => setReportReason(event.target.value as ReportReasonCode)}
+                className="min-h-11 w-full border border-control-border bg-surface px-3 text-sm text-text-primary focus:border-brand focus:outline-2 focus:outline-offset-1 focus:outline-focus"
+              >
+                {Object.entries(REPORT_REASON_LABELS).map(([value, label]) => (
+                  <option key={value} value={value}>
+                    {label}
+                  </option>
+                ))}
+              </select>
+            </div>
+          )}
           <div>
             <label htmlFor="report-detail" className="mb-1 block text-sm font-medium text-text-primary">
-              补充说明（可选）
+              {reportType === 'correction' ? '纠错说明（必填）' : '补充说明（可选）'}
             </label>
             <textarea
               id="report-detail"
@@ -373,7 +411,11 @@ export function ResourceActions({
               rows={4}
               maxLength={2000}
               className="w-full border border-control-border bg-surface px-3 py-2 text-sm text-text-primary focus:border-brand focus:outline-2 focus:outline-offset-1 focus:outline-focus"
-              placeholder="说明你发现的问题，便于处理。"
+              placeholder={
+                reportType === 'correction'
+                  ? '说明错在哪里、正确的是什么；纠错会绑定当前公开版本。'
+                  : '说明你发现的问题，便于处理。'
+              }
             />
           </div>
           <div className="flex justify-end gap-2">
