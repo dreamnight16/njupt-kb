@@ -1,0 +1,99 @@
+'use client';
+
+import Link from 'next/link';
+import { useQuery } from '@tanstack/react-query';
+
+import { Notice } from '@/components/common/Notice';
+import { Button } from '@/components/ui/Button';
+import { SkeletonList } from '@/components/ui/Skeleton';
+import { describeError } from '@/lib/api/client';
+import { listMyCorrections, listMyRequests } from '@/lib/api/interaction';
+import { formatDateTime } from '@/lib/utils';
+
+export function ContributionHistory() {
+  const correctionsQuery = useQuery({
+    queryKey: ['my-corrections'],
+    queryFn: () => listMyCorrections(),
+  });
+  const requestsQuery = useQuery({
+    queryKey: ['my-requests'],
+    queryFn: () => listMyRequests(),
+  });
+
+  return (
+    <div className="space-y-6">
+      <section aria-labelledby="my-corrections">
+        <h2 id="my-corrections" className="dn-display text-2xl">
+          我提交的纠错
+        </h2>
+        <div className="mt-3">
+          {correctionsQuery.isLoading ? (
+            <SkeletonList count={2} />
+          ) : correctionsQuery.error ? (
+            <Notice
+              tone="warning"
+              title="纠错记录暂时无法加载"
+              action={<Button variant="secondary" onClick={() => correctionsQuery.refetch()}>重试</Button>}
+            >
+              {describeError(correctionsQuery.error).message}
+            </Notice>
+          ) : correctionsQuery.data && correctionsQuery.data.items.length > 0 ? (
+            <ul className="space-y-3">
+              {correctionsQuery.data.items.map((item) => (
+                <li key={item.id} className="border border-divider bg-surface p-4">
+                  <p className="text-sm text-text-primary">{item.description}</p>
+                  <p className="mt-1 text-xs text-text-secondary">
+                    状态：{item.status} · 提交于 {formatDateTime(item.created_at)}
+                  </p>
+                  {item.resolution_note && (
+                    <p className="mt-1 text-xs text-text-secondary">处理说明：{item.resolution_note}</p>
+                  )}
+                </li>
+              ))}
+            </ul>
+          ) : (
+            <Notice tone="info" title="还没有提交过纠错">
+              在资料详情页可以使用「举报或纠错」提交问题。
+            </Notice>
+          )}
+        </div>
+      </section>
+
+      <section aria-labelledby="my-requests">
+        <h2 id="my-requests" className="dn-display text-2xl">
+          我发布的求资料
+        </h2>
+        <div className="mt-3">
+          {requestsQuery.isLoading ? (
+            <SkeletonList count={2} />
+          ) : requestsQuery.error ? (
+            <Notice
+              tone="warning"
+              title="求资料记录暂时无法加载"
+              action={<Button variant="secondary" onClick={() => requestsQuery.refetch()}>重试</Button>}
+            >
+              {describeError(requestsQuery.error).message}
+            </Notice>
+          ) : requestsQuery.data && requestsQuery.data.items.length > 0 ? (
+            <ul className="space-y-3">
+              {requestsQuery.data.items.map((item) => (
+                <li key={item.id} className="border border-divider bg-surface p-4">
+                  <p className="text-sm text-text-primary">{item.description}</p>
+                  <p className="mt-1 text-xs text-text-secondary">
+                    状态：{item.status} · {item.follower_count} 人关注 · 发布于{' '}
+                    {formatDateTime(item.created_at)}
+                  </p>
+                </li>
+              ))}
+            </ul>
+          ) : (
+            <Notice tone="info" title="还没有发布过资料需求">
+              可以在<Link href="/requests" className="underline underline-offset-2">求资料</Link>
+              中为课程提出需求，或关注他人已有的需求。
+            </Notice>
+          )}
+        </div>
+      </section>
+    </div>
+  );
+}
