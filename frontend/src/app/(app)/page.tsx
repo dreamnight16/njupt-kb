@@ -25,11 +25,10 @@ export default async function HomePage() {
 
   return (
     <div className="space-y-10">
-      {/* Hero：大面积品牌实色色块 + 表达性排版（DESIGN.md §5.1）。 */}
-      <section className="bg-brand px-6 py-10 text-on-color md:px-10 md:py-14">
+      <section className="bg-brand px-6 py-6 text-on-color md:px-10 md:py-8">
         <p className="dn-kicker">NJUPT COURSE KNOWLEDGE</p>
-        <h1 className="dn-display mt-3 max-w-2xl text-4xl md:text-5xl">
-          按课程找到可追溯的学习资料
+        <h1 className="dn-display mt-3 max-w-2xl text-3xl md:text-4xl">
+          找到这门课需要的资料
         </h1>
         <p className="mt-4 max-w-xl text-on-color">
           输入课程名、代码或资料标题开始；结果按课程组织，便于判断适用范围后再阅读或下载。
@@ -45,13 +44,27 @@ export default async function HomePage() {
             浏览全部课程
           </Link>
           <Link
-            href="/search"
+            href="/requests?new=1"
             className="inline-flex min-h-11 items-center border border-on-color/40 px-4 text-sm font-medium text-on-color hover:bg-on-color/10"
           >
-            直接搜索资料
+            没找到？求资料
           </Link>
         </div>
       </section>
+
+      <nav aria-label="常用操作" className="grid grid-cols-2 gap-3 sm:grid-cols-4">
+        {[
+          ['/me/favorites', '我的收藏', '继续阅读已收藏的资料'],
+          ['/me/follows', '我的关注', '查看关注的课程和需求'],
+          ['/upload', '上传资料', '分享笔记、试卷与课件'],
+          ['/me/resources', '我的资料', '继续草稿、查看审核进度'],
+        ].map(([href, title, hint]) => (
+          <Link key={href} href={href} className="border border-divider bg-surface p-4 hover:bg-canvas">
+            <span className="font-medium text-text-primary">{title}</span>
+            <span className="mt-1 block text-xs text-text-secondary">{hint}</span>
+          </Link>
+        ))}
+      </nav>
 
       <section aria-labelledby="recent-courses">
         <div className="mb-4 flex items-end justify-between gap-4">

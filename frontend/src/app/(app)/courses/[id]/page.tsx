@@ -108,104 +108,15 @@ export default async function CourseDetailPage({
 
       {/* 关注与求资料：P2 共建入口，与收藏分开（§20.2）。 */}
       <div className="flex flex-wrap items-center gap-3">
+        <Link href={`/upload?course_id=${course.id}`} className="inline-flex min-h-11 items-center bg-brand px-4 text-sm font-medium text-on-color hover:bg-brand/90">上传这门课的资料</Link>
         <CourseFollowButton courseId={course.id} />
         <Link
-          href="/requests"
+          href={`/requests?course_id=${course.id}&new=1`}
           className="inline-flex min-h-11 items-center border border-control-border px-4 text-sm font-medium text-text-primary hover:bg-canvas"
         >
           为这门课求资料
         </Link>
       </div>
-
-      {course.description && (
-        <section aria-labelledby="course-intro">
-          <h2 id="course-intro" className="dn-display text-2xl">
-            课程介绍
-          </h2>
-          <p className="mt-3 max-w-3xl whitespace-pre-line text-text-secondary">
-            {course.description}
-          </p>
-        </section>
-      )}
-
-      <section aria-labelledby="course-curricula">
-        <h2 id="course-curricula" className="dn-display text-2xl">
-          适用培养方案
-        </h2>
-        {course.curricula.length > 0 ? (
-          <div className="mt-3 overflow-x-auto border border-divider">
-            <table className="w-full min-w-[640px] border-collapse text-sm">
-              <thead>
-                <tr className="bg-canvas text-left text-text-secondary">
-                  <th className="px-4 py-3 font-medium">专业</th>
-                  <th className="px-4 py-3 font-medium">培养方案</th>
-                  <th className="px-4 py-3 font-medium">入学年级</th>
-                  <th className="px-4 py-3 font-medium">课程性质</th>
-                  <th className="px-4 py-3 font-medium">建议学期</th>
-                </tr>
-              </thead>
-              <tbody>
-                {course.curricula.map((link) => (
-                  <tr key={link.curriculum_id} className="border-t border-divider">
-                    <td className="px-4 py-3 text-text-primary">{link.major_name}</td>
-                    <td className="px-4 py-3 text-text-secondary">{link.curriculum_name}</td>
-                    <td className="px-4 py-3 text-text-secondary">
-                      {link.entry_year ?? '未标注'}
-                    </td>
-                    <td className="px-4 py-3 text-text-secondary">{link.requirement_type}</td>
-                    <td className="px-4 py-3 text-text-secondary">
-                      {link.recommended_term ?? '未标注'}
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        ) : (
-          <Notice tone="info" title="暂未记录该课程的培养方案归属">
-            课程可能属于公共课或尚未完成目录维护；资料仍按课程本身关联。
-          </Notice>
-        )}
-      </section>
-
-      <section aria-labelledby="course-offerings">
-        <h2 id="course-offerings" className="dn-display text-2xl">
-          开课范围
-        </h2>
-        {offeringsResult.error ? (
-          <div className="mt-3">
-            <Notice tone="warning" title="开课实例暂时无法加载">
-              {offeringsResult.error.message}
-            </Notice>
-          </div>
-        ) : offeringsResult.data && offeringsResult.data.length > 0 ? (
-          <ul className="mt-3 grid gap-3 sm:grid-cols-2">
-            {offeringsResult.data.map((offering) => (
-              <li key={offering.id} className="border border-divider bg-surface p-4">
-                <p className="font-medium text-text-primary">
-                  {offering.academic_year} · {seasonLabels[offering.season] ?? offering.season}
-                  {offering.section_code ? ` · ${offering.section_code} 班` : ''}
-                </p>
-                <p className="mt-1 text-sm text-text-secondary">
-                  教师：
-                  {offering.teachers.length > 0
-                    ? offering.teachers.map((teacher) => teacher.display_name).join('、')
-                    : '未记录'}
-                </p>
-                {offering.textbook && (
-                  <p className="mt-1 text-sm text-text-secondary">教材：{offering.textbook}</p>
-                )}
-              </li>
-            ))}
-          </ul>
-        ) : (
-          <div className="mt-3">
-            <Notice tone="info" title="暂未记录开课实例">
-              该课程的资料可能跨学期通用，未绑定到具体开课实例。
-            </Notice>
-          </div>
-        )}
-      </section>
 
       <section aria-labelledby="course-resources">
         <h2 id="course-resources" className="dn-display text-2xl">
@@ -265,6 +176,103 @@ export default async function CourseDetailPage({
           )}
         </div>
       </section>
+
+      <details className="border border-divider bg-surface p-4">
+        <summary className="cursor-pointer font-medium text-text-primary">课程介绍、培养方案与开课范围</summary>
+        <div className="mt-6 space-y-6">
+          {course.description && (
+            <section aria-labelledby="course-intro">
+              <h2 id="course-intro" className="dn-display text-2xl">
+                课程介绍
+              </h2>
+              <p className="mt-3 max-w-3xl whitespace-pre-line text-text-secondary">
+                {course.description}
+              </p>
+            </section>
+          )}
+
+          <section aria-labelledby="course-curricula">
+            <h2 id="course-curricula" className="dn-display text-2xl">
+              适用培养方案
+            </h2>
+            {course.curricula.length > 0 ? (
+              <div className="mt-3 overflow-x-auto border border-divider">
+                <table className="w-full min-w-[640px] border-collapse text-sm">
+                  <thead>
+                    <tr className="bg-canvas text-left text-text-secondary">
+                      <th className="px-4 py-3 font-medium">专业</th>
+                      <th className="px-4 py-3 font-medium">培养方案</th>
+                      <th className="px-4 py-3 font-medium">入学年级</th>
+                      <th className="px-4 py-3 font-medium">课程性质</th>
+                      <th className="px-4 py-3 font-medium">建议学期</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {course.curricula.map((link) => (
+                      <tr key={link.curriculum_id} className="border-t border-divider">
+                        <td className="px-4 py-3 text-text-primary">{link.major_name}</td>
+                        <td className="px-4 py-3 text-text-secondary">{link.curriculum_name}</td>
+                        <td className="px-4 py-3 text-text-secondary">
+                          {link.entry_year ?? '未标注'}
+                        </td>
+                        <td className="px-4 py-3 text-text-secondary">{link.requirement_type}</td>
+                        <td className="px-4 py-3 text-text-secondary">
+                          {link.recommended_term ?? '未标注'}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            ) : (
+              <Notice tone="info" title="暂未记录该课程的培养方案归属">
+                课程可能属于公共课或尚未完成目录维护；资料仍按课程本身关联。
+              </Notice>
+            )}
+          </section>
+
+          <section aria-labelledby="course-offerings">
+            <h2 id="course-offerings" className="dn-display text-2xl">
+              开课范围
+            </h2>
+            {offeringsResult.error ? (
+              <div className="mt-3">
+                <Notice tone="warning" title="开课实例暂时无法加载">
+                  {offeringsResult.error.message}
+                </Notice>
+              </div>
+            ) : offeringsResult.data && offeringsResult.data.length > 0 ? (
+              <ul className="mt-3 grid gap-3 sm:grid-cols-2">
+                {offeringsResult.data.map((offering) => (
+                  <li key={offering.id} className="border border-divider bg-surface p-4">
+                    <p className="font-medium text-text-primary">
+                      {offering.academic_year} · {seasonLabels[offering.season] ?? offering.season}
+                      {offering.section_code ? ` · ${offering.section_code} 班` : ''}
+                    </p>
+                    <p className="mt-1 text-sm text-text-secondary">
+                      教师：
+                      {offering.teachers.length > 0
+                        ? offering.teachers.map((teacher) => teacher.display_name).join('、')
+                        : '未记录'}
+                    </p>
+                    {offering.textbook && (
+                      <p className="mt-1 text-sm text-text-secondary">教材：{offering.textbook}</p>
+                    )}
+                  </li>
+                ))}
+              </ul>
+            ) : (
+              <div className="mt-3">
+                <Notice tone="info" title="暂未记录开课实例">
+                  该课程的资料可能跨学期通用，未绑定到具体开课实例。
+                </Notice>
+              </div>
+            )}
+          </section>
+
+
+        </div>
+      </details>
     </div>
   );
 }

@@ -198,7 +198,7 @@ def main():
         page.get_by_role("link", name="查看与管理").click()
         expect(page.get_by_label("标题", exact=True)).to_have_value("Beta3 测试新版")
         page.get_by_label("标题", exact=True).fill("Beta3 已保存的修订")
-        expect(page.get_by_role("button", name="提交审核", exact=True)).to_be_disabled()
+        expect(page.get_by_role("button", name="提交审核", exact=True)).to_be_enabled()
         page.get_by_role("button", name="保存草稿", exact=True).click()
         expect(
             page.get_by_role("heading", name="Beta3 已保存的修订 · V2")

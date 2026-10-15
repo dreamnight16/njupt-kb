@@ -95,6 +95,28 @@ export default async function ResourceDetailPage({
         </div>
       </header>
 
+      <section aria-labelledby="resource-files">
+        <h2 id="resource-files" className="dn-display text-2xl">
+          文件与预览
+        </h2>
+        <div className="mt-3">
+          {filesResult.error ? (
+            <Notice tone="warning" title="文件清单暂时无法加载">
+              {filesResult.error.message}
+            </Notice>
+          ) : (
+            <ResourceActions
+              resourceId={resource.id}
+              versionId={version?.id ?? null}
+              versionNo={version?.version_no ?? null}
+              publicationStatus={resource.publication_status}
+              previewAvailable={resource.preview_available}
+              files={files}
+            />
+          )}
+        </div>
+      </section>
+
       {version?.description && (
         <section aria-labelledby="resource-desc">
           <h2 id="resource-desc" className="dn-display text-2xl">
@@ -117,27 +139,7 @@ export default async function ResourceDetailPage({
         </section>
       )}
 
-      <section aria-labelledby="resource-files">
-        <h2 id="resource-files" className="dn-display text-2xl">
-          文件与预览
-        </h2>
-        <div className="mt-3">
-          {filesResult.error ? (
-            <Notice tone="warning" title="文件清单暂时无法加载">
-              {filesResult.error.message}
-            </Notice>
-          ) : (
-            <ResourceActions
-              resourceId={resource.id}
-              versionId={version?.id ?? null}
-              versionNo={version?.version_no ?? null}
-              publicationStatus={resource.publication_status}
-              previewAvailable={resource.preview_available}
-              files={files}
-            />
-          )}
-        </div>
-      </section>
+
 
       <section aria-labelledby="resource-known-issues">
         <h2 id="resource-known-issues" className="dn-display text-2xl">

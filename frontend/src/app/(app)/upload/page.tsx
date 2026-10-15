@@ -1,26 +1,37 @@
 import type { Metadata } from 'next';
 
 import { AuthGuard } from '@/components/layout/AuthGuard';
+import { Notice } from '@/components/common/Notice';
+import type { CourseDetail } from '@/lib/api/catalog';
+import { serverFetch } from '@/lib/api/server';
+import { isUuid } from '@/lib/utils';
 import { UploadFlow } from '@/components/upload/UploadFlow';
 
 export const metadata: Metadata = {
-  title: '上传与修订',
+  title: '上传资料',
   robots: { index: false, follow: false },
 };
 
-export default function UploadPage() {
+export const dynamic = 'force-dynamic';
+
+export default async function UploadPage({ searchParams }: {
+  searchParams: Promise<{ course_id?: string }>;
+}) {
+  const { course_id } = await searchParams;
+  const courseResult = course_id && isUuid(course_id)
+    ? await serverFetch<CourseDetail>(`/courses/${course_id}`) : null;
   return (
     <AuthGuard>
       <div className="space-y-6">
         <header className="bg-ink px-6 py-8 text-on-ink">
           <p className="dn-kicker">UPLOAD</p>
-          <h1 className="dn-display mt-2 text-3xl">上传与修订</h1>
+          <h1 className="dn-display mt-2 text-3xl">上传资料</h1>
           <p className="mt-2 max-w-2xl text-on-ink">
-            文件通过上传会话进入私有隔离区，核验并通过安全检查后才可用于发布；
-            保存草稿与提交审核是两个不同动作。
+            选择课程与文件，补充标题和来源后提交审核。未完成时可以保存草稿，稍后继续。
           </p>
         </header>
-        <UploadFlow />
+        {course_id && !courseResult?.data && <Notice tone="warning" title="未能带入课程">请重新搜索并选择课程。</Notice>}
+        <UploadFlow key={course_id ?? 'new'} initialCourse={courseResult?.data ?? null} />
       </div>
     </AuthGuard>
   );

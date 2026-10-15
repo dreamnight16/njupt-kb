@@ -12,6 +12,7 @@ import {
   Home,
   LogOut,
   Search,
+  MessageSquare,
   ShieldCheck,
   UserCog,
 } from 'lucide-react';
@@ -23,6 +24,7 @@ const mainNav = [
   { href: '/', label: '首页', icon: Home },
   { href: '/courses', label: '课程', icon: BookOpen },
   { href: '/search', label: '搜索', icon: Search },
+  { href: '/requests', label: '求资料', icon: MessageSquare },
 ];
 
 function isActive(pathname: string, href: string): boolean {
@@ -91,15 +93,15 @@ export function AppHeader() {
         </nav>
 
         <div className="ml-auto flex items-center gap-2">
+          <Link
+            href="/upload"
+            className="hidden min-h-11 items-center gap-2 bg-brand px-3 text-sm font-medium text-on-color hover:bg-brand/90 lg:inline-flex"
+          >
+            <FileUp className="h-4 w-4" aria-hidden="true" />
+            上传资料
+          </Link>
           {authed ? (
             <>
-              <Link
-                href="/upload"
-                className="hidden min-h-11 items-center gap-2 bg-brand px-4 text-sm font-medium text-on-color hover:bg-brand/90 sm:inline-flex"
-              >
-                <FileUp className="h-4 w-4" aria-hidden="true" />
-                上传资料
-              </Link>
               <div className="relative" ref={menuRef}>
                 <button
                   type="button"
@@ -133,6 +135,7 @@ export function AppHeader() {
                     </div>
                     <MenuLink href="/me/resources" icon={BookOpen} label="我的资料" />
                     <MenuLink href="/me/favorites" icon={Heart} label="我的收藏" />
+                    <MenuLink href="/me/follows" icon={BookOpen} label="我的关注" />
                     <MenuLink href="/me/notifications" icon={Bell} label="通知" />
                     <MenuLink href="/me/security" icon={UserCog} label="账号与安全" />
                     {canReview(user) && (

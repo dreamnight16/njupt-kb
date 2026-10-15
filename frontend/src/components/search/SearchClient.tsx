@@ -1,5 +1,6 @@
 'use client';
 
+import Link from 'next/link';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { FormEvent, useState } from 'react';
 import { useInfiniteQuery } from '@tanstack/react-query';
@@ -19,6 +20,11 @@ import {
 } from '@/lib/api/types';
 
 export function SearchClient() {
+  const params = useSearchParams();
+  return <SearchResults key={params.toString()} />;
+}
+
+function SearchResults() {
   const router = useRouter();
   const searchParams = useSearchParams();
 
@@ -48,14 +54,18 @@ export function SearchClient() {
     getNextPageParam: (lastPage) => lastPage.next_cursor ?? undefined,
   });
 
-  function applyFilters(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault();
+  function navigateFilters(nextType = type) {
     const next = new URLSearchParams();
     if (keyword.trim()) next.set('q', keyword.trim());
-    if (type) next.set('resource_type', type);
+    if (nextType) next.set('resource_type', nextType);
     if (/^\d{4}$/.test(yearInput)) next.set('applicable_year', yearInput);
     const queryString = next.toString();
     router.push(queryString ? `/search?${queryString}` : '/search');
+  }
+
+  function applyFilters(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    navigateFilters();
   }
 
   const items = query.data?.pages.flatMap((page) => page.items) ?? [];
@@ -66,7 +76,7 @@ export function SearchClient() {
         <p className="dn-kicker">SEARCH</p>
         <h1 className="dn-display mt-2 text-3xl">搜索资料</h1>
         <p className="mt-2 max-w-2xl text-on-color">
-          输入课程名、课程代码、简称、资料标题或教师姓名；默认只返回你有权限查看的已发布版本。
+          输入课程名、课程代码、简称、资料标题或教师姓名；也可以直接浏览下方资料。
         </p>
       </header>
 
@@ -94,7 +104,10 @@ export function SearchClient() {
           <select
             id="search-type"
             value={type}
-            onChange={(event) => setType(event.target.value)}
+            onChange={(event) => {
+              setType(event.target.value);
+              navigateFilters(event.target.value);
+            }}
             className="min-h-11 w-full border border-control-border bg-surface px-3 text-sm text-text-primary focus:border-brand focus:outline-2 focus:outline-offset-1 focus:outline-focus"
           >
             <option value="">全部类型</option>
@@ -143,11 +156,7 @@ export function SearchClient() {
         </div>
       </form>
 
-      {!q && !activeFilters ? (
-        <Notice tone="info" title="输入关键词开始搜索">
-          也可以先浏览课程目录，再进入课程页按类型查找资料。
-        </Notice>
-      ) : query.isLoading ? (
+      {query.isLoading ? (
         <SkeletonList count={3} />
       ) : query.error ? (
         <Notice
@@ -163,7 +172,8 @@ export function SearchClient() {
         </Notice>
       ) : items.length === 0 ? (
         <Notice tone="info" title="没有匹配的资料">
-          可以换一个关键词，或放宽资料类型与年份筛选。
+          <p>可以换一个关键词，或放宽资料类型与年份筛选。</p>
+          <Link href="/requests?new=1" className="mt-2 inline-flex min-h-11 items-center underline">没找到？提出资料需求</Link>
         </Notice>
       ) : (
         <>

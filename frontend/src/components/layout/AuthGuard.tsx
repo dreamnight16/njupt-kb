@@ -50,7 +50,7 @@ export function AuthGuard({
 
   useEffect(() => {
     if (status === 'guest') {
-      router.replace(`/login?next=${encodeURIComponent(pathname)}`);
+      router.replace(`/login?next=${encodeURIComponent(pathname + window.location.search)}`);
     }
   }, [status, router, pathname]);
 

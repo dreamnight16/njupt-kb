@@ -1,7 +1,7 @@
 'use client';
 
 import Link from 'next/link';
-import { useState } from 'react';
+import { useRef, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import toast from 'react-hot-toast';
@@ -47,6 +47,14 @@ function SnapshotEditor({ detail }: { detail: VersionDetail }) {
   const [error, setError] = useState('');
   const [withdrawReason, setWithdrawReason] = useState('');
   const [saved, setSaved] = useState(true);
+  const savedRevision = useRef(version.revision);
+  const submitKey = useRef<string | null>(null);
+
+  async function saveChanges() {
+    const updated = await updateVersion(detail.resource_id, version.id, { ...payload(), revision: savedRevision.current });
+    savedRevision.current = updated.revision;
+    setSaved(true);
+  }
 
   async function act(action: () => Promise<void>) {
     setBusy(true); setError('');
@@ -106,11 +114,12 @@ function SnapshotEditor({ detail }: { detail: VersionDetail }) {
     <div className="flex flex-wrap gap-3">
       {editable ? <>
         <Button disabled={busy || !title.trim() || !files.length} onClick={() => act(async () => {
-          await updateVersion(detail.resource_id, version.id, { ...payload(), revision: version.revision });
-          setSaved(true); await refresh(); toast.success('草稿已保存');
+          await saveChanges(); await refresh(); toast.success('草稿已保存');
         })}>保存草稿</Button>
-        <Button variant="secondary" disabled={busy || !saved || !files.length} onClick={() => act(async () => {
-          await submitVersion(detail.resource_id, version.id, crypto.randomUUID());
+        <Button variant="primary" disabled={busy || !title.trim() || !files.length || files.some(file => file.scan_status !== 'passed')} onClick={() => act(async () => {
+          if (!saved) await saveChanges();
+          submitKey.current ??= crypto.randomUUID();
+          await submitVersion(detail.resource_id, version.id, submitKey.current);
           await refresh(); toast.success('已提交审核');
         })}>提交审核</Button>
       </> : detail.can_edit && <Button disabled={busy} onClick={() => act(async () => {
@@ -123,6 +132,7 @@ function SnapshotEditor({ detail }: { detail: VersionDetail }) {
         const grant = await createPreviewGrant(detail.resource_id, version.id); window.location.assign(grant.preview_url);
       })}>查看预览</Button>}
     </div>
+    {editable && <p className="text-sm text-text-secondary">提交审核会先保存当前修改。文件必须通过安全检查；未就绪时可先保存草稿。</p>}
     {detail.publication_status === 'published' && detail.can_edit && <div className="space-y-2 border-t border-divider pt-5">
       <label className="block text-sm">撤回理由<input className={field} value={withdrawReason} onChange={event => setWithdrawReason(event.target.value)} maxLength={1000} /></label>
       <Button variant="danger" disabled={busy || !withdrawReason.trim()} onClick={() => {

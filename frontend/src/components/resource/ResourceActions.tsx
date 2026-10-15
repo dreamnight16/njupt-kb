@@ -178,6 +178,7 @@ export function ResourceActions({
   }
 
   const summary = ratingQuery.data;
+  const published = publicationStatus === 'published';
 
   return (
     <div className="space-y-6">
@@ -191,77 +192,12 @@ export function ResourceActions({
         </Notice>
       )}
 
-      {/* 文件清单：检查状态以文字 + 颜色共同表达，未通过检查的文件不可下载。 */}
-      <ul className="space-y-3">
-        {files.length === 0 && (
-          <li>
-            <Notice tone="info" title="该版本暂无文件记录">
-              文件可能仍在处理中，稍后再查看。
-            </Notice>
-          </li>
-        )}
-        {files.map((file) => {
-          const scan = scanLabels[file.scan_status] ?? {
-            label: file.scan_status,
-            className: 'bg-steel text-on-color',
-            downloadable: false,
-          };
-          const canDownload = scan.downloadable && authed && !!versionId;
-          return (
-            <li
-              key={file.id}
-              className="flex flex-col gap-3 border border-divider bg-surface p-4 sm:flex-row sm:items-center sm:justify-between"
-            >
-              <div className="min-w-0">
-                <p className="truncate font-medium text-text-primary">{file.original_name}</p>
-                <p className="mt-1 text-xs text-text-secondary">
-                  {purposeLabels[file.purpose] ?? file.purpose} · {formatFileSize(file.size)}
-                  {file.page_count ? ` · ${file.page_count} 页` : ''}
-                </p>
-                <div className="mt-2 flex flex-wrap items-center gap-2">
-                  <span className={`px-2 py-0.5 text-xs font-semibold ${scan.className}`}>
-                    {scan.label}
-                  </span>
-                  {!scan.downloadable && (
-                    <span className="text-xs text-text-secondary">
-                      {file.scan_status === 'pending' || file.scan_status === 'running'
-                        ? '安全检查完成前不能下载，可稍后刷新查看进度。'
-                        : '该文件未通过安全检查，不能下载。'}
-                    </span>
-                  )}
-                </div>
-              </div>
-              <div className="flex shrink-0 flex-wrap gap-2">
-                <Button
-                  variant="secondary"
-                  onClick={() => handleDownload(file)}
-                  isLoading={pendingFileId === file.id}
-                  disabled={!canDownload}
-                >
-                  <Download className="h-4 w-4" aria-hidden="true" />
-                  下载原件
-                </Button>
-              </div>
-            </li>
-          );
-        })}
-      </ul>
-
-      {/* 访问门槛在操作前说明（§26.3）：不把收费/额度留到点击后才发现。 */}
-      <Notice tone="info" title="访问说明">
-        <ul className="space-y-1">
-          <li>· 预览与下载由服务端按访问范围、文件状态与下载额度判定。</li>
-          <li>· 下载需要登录；未获得权益或超出额度时会明确拒绝，不会出现隐含收费。</li>
-          <li>· 已获得的短期链接在有效期内可继续使用；资料下架后不再签发新链接。</li>
-        </ul>
-      </Notice>
-
       <div className="flex flex-wrap gap-2">
         <Button
           variant="primary"
           onClick={handlePreview}
           isLoading={previewing}
-          disabled={!previewAvailable || !versionId}
+          disabled={!previewAvailable || !versionId || !published}
         >
           <Eye className="h-4 w-4" aria-hidden="true" />
           查看预览
@@ -295,6 +231,76 @@ export function ResourceActions({
           举报或纠错
         </Button>
       </div>
+
+
+      {/* 文件清单：检查状态以文字 + 颜色共同表达，未通过检查的文件不可下载。 */}
+      <ul className="space-y-3">
+        {files.length === 0 && (
+          <li>
+            <Notice tone="info" title="该版本暂无文件记录">
+              文件可能仍在处理中，稍后再查看。
+            </Notice>
+          </li>
+        )}
+        {files.map((file) => {
+          const scan = scanLabels[file.scan_status] ?? {
+            label: file.scan_status,
+            className: 'bg-steel text-on-color',
+            downloadable: false,
+          };
+          const canDownload = scan.downloadable && authed && !!versionId && published;
+          return (
+            <li
+              key={file.id}
+              className="flex flex-col gap-3 border border-divider bg-surface p-4 sm:flex-row sm:items-center sm:justify-between"
+            >
+              <div className="min-w-0">
+                <p className="truncate font-medium text-text-primary">{file.original_name}</p>
+                <p className="mt-1 text-xs text-text-secondary">
+                  {purposeLabels[file.purpose] ?? file.purpose} · {formatFileSize(file.size)}
+                  {file.page_count ? ` · ${file.page_count} 页` : ''}
+                </p>
+                <div className="mt-2 flex flex-wrap items-center gap-2">
+                  <span className={`px-2 py-0.5 text-xs font-semibold ${scan.className}`}>
+                    {scan.label}
+                  </span>
+                  {!scan.downloadable && (
+                    <span className="text-xs text-text-secondary">
+                      {file.scan_status === 'pending' || file.scan_status === 'running'
+                        ? '安全检查完成前不能下载，可稍后刷新查看进度。'
+                        : '该文件未通过安全检查，不能下载。'}
+                    </span>
+                  )}
+                </div>
+              </div>
+              <div className="flex shrink-0 flex-wrap gap-2">
+                {!authed && published && scan.downloadable ? (
+                  <a href={`/login?next=${encodeURIComponent(`/resources/${resourceId}`)}`} className="inline-flex min-h-11 items-center bg-brand px-4 text-sm text-on-color">登录后下载</a>
+                ) : <Button
+                  variant="secondary"
+                  onClick={() => handleDownload(file)}
+                  isLoading={pendingFileId === file.id}
+                  disabled={!canDownload}
+                >
+                  <Download className="h-4 w-4" aria-hidden="true" />
+                  下载原件
+                </Button>}
+              </div>
+            </li>
+          );
+        })}
+      </ul>
+
+      {/* 访问门槛在操作前说明（§26.3）：不把收费/额度留到点击后才发现。 */}
+      <details className="border border-divider bg-surface p-3 text-sm text-text-secondary">
+        <summary className="cursor-pointer font-medium">访问与下载说明</summary>
+        <ul className="space-y-1">
+          <li>· 预览与下载由服务端按访问范围、文件状态与下载额度判定。</li>
+          <li>· 下载需要登录；未获得权益或超出额度时会明确拒绝，不会出现隐含收费。</li>
+          <li>· 已获得的短期链接在有效期内可继续使用；资料下架后不再签发新链接。</li>
+        </ul>
+      </details>
+
 
       {/* 评分：一个用户对同一版本只有一条有效评分，可修改。 */}
       <section aria-labelledby="resource-rating" className="border border-divider bg-surface p-4">

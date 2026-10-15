@@ -73,9 +73,9 @@ function newKey(): string {
   return `up-${Date.now()}-${Math.random().toString(16).slice(2)}`;
 }
 
-export function UploadFlow() {
+export function UploadFlow({ initialCourse = null }: { initialCourse?: Pick<CourseListItem, 'id' | 'name' | 'code' | 'college_name'> | null }) {
   const [courseKeyword, setCourseKeyword] = useState('');
-  const [course, setCourse] = useState<CourseListItem | null>(null);
+  const [course, setCourse] = useState<Pick<CourseListItem, 'id' | 'name' | 'code' | 'college_name'> | null>(initialCourse);
   const [resourceType, setResourceType] = useState<ResourceType>('note');
   const [entries, setEntries] = useState<FileEntry[]>([]);
   const [title, setTitle] = useState('');
@@ -93,6 +93,9 @@ export function UploadFlow() {
   const [submitting, setSubmitting] = useState(false);
 
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const createKey = useRef<string | null>(null);
+  const submitKey = useRef<string | null>(null);
+  const [submitted, setSubmitted] = useState(false);
 
   const courseQuery = useQuery({
     queryKey: ['upload-course-search', courseKeyword],
@@ -169,6 +172,7 @@ export function UploadFlow() {
     }
 
     if (accepted.length === 0) return;
+    if (!title.trim()) setTitle(accepted[0].file.name.replace(/\.[^.]+$/, ''));
     setEntries((prev) => [...prev, ...accepted]);
 
     for (const entry of accepted) {
@@ -218,24 +222,15 @@ export function UploadFlow() {
     rightsLicense, uploadableFiles.map(entry => entry.fileId)]);
 
   const canSave =
-    !!course && title.trim().length > 0 && uploadableFiles.length > 0 && !!rightsBasis;
+    !!course && title.trim().length > 0 && entries.length > 0 &&
+    entries.every((entry) => entry.phase === 'done' && !!entry.fileId) && !!rightsBasis;
   const allScansPassed =
     uploadableFiles.length > 0 &&
     uploadableFiles.every((entry) => entry.scanStatus === 'passed');
 
   async function handleSaveDraft() {
-    if (!course) {
-      toast.error('请先选择课程');
-      return;
-    }
-    if (!title.trim()) {
-      toast.error('请填写资料标题');
-      return;
-    }
-    if (uploadableFiles.length === 0) {
-      toast.error('请至少上传一个文件并等待上传完成');
-      return;
-    }
+    if (!canSave || !course) return null;
+    if (created && savedFingerprint === formFingerprint) return created;
     setSaving(true);
     try {
       const payload = {
@@ -262,34 +257,38 @@ export function UploadFlow() {
             .map((tag) => tag.trim())
             .filter(Boolean),
         };
+      let saved = created;
       if (created) {
         const version = await updateVersion(created.resourceId, created.versionId, { ...payload, revision: created.revision });
-        setCreated({ ...created, revision: version.revision });
+        saved = { ...created, revision: version.revision };
       } else {
-        const result = await createResource(payload, newKey());
-        setCreated({ resourceId: result.resource_id, versionId: result.version_id, revision: 1 });
+        createKey.current ??= newKey();
+        const result = await createResource(payload, createKey.current);
+        saved = { resourceId: result.resource_id, versionId: result.version_id, revision: 1 };
       }
-      toast.success('草稿已保存');
+      setCreated(saved);
       setSavedFingerprint(formFingerprint);
+      toast.success('草稿已保存');
+      return saved;
     } catch (error) {
       toast.error(describeError(error).message);
+      return null;
     } finally {
       setSaving(false);
     }
   }
 
   async function handleSubmit() {
-    if (!created || savedFingerprint !== formFingerprint) return;
+    if (!canSave || !allScansPassed || saving || submitting) return;
     setSubmitting(true);
     try {
-      await submitVersion(created.resourceId, created.versionId, newKey());
+      // 保存成功才提交；提交失败保留同一草稿，重试不会新建资料。
+      const saved = await handleSaveDraft();
+      if (!saved) return;
+      submitKey.current ??= newKey();
+      await submitVersion(saved.resourceId, saved.versionId, submitKey.current);
       toast.success('已提交审核，结果会通过站内通知告知');
-      setCreated(null);
-      setEntries([]);
-      setTitle('');
-      setDescription('');
-      setChangeSummary('');
-      setTagsInput('');
+      setSubmitted(true);
     } catch (error) {
       toast.error(describeError(error).message);
     } finally {
@@ -297,10 +296,17 @@ export function UploadFlow() {
     }
   }
 
+  if (submitted) return (
+    <Notice tone="info" title="已提交审核">
+      <p>审核通过后资料才会公开。你可以在我的资料中查看进度与审核意见。</p>
+      <Link href="/me/resources" className="mt-3 inline-flex min-h-11 items-center bg-brand px-4 text-sm text-on-color">查看我的资料</Link>
+    </Notice>
+  );
+
   return (
-    <div className="space-y-8">
+    <fieldset disabled={saving || submitting} className="min-w-0 space-y-6">
       {/* 步骤 1：课程与类型 */}
-      <StepBlock index={1} title="选择课程与资料类型" tone="bg-brand">
+      <StepBlock index={1} title="选择课程与文件" tone="bg-brand">
         {course ? (
           <div className="flex flex-wrap items-center justify-between gap-3 border border-divider bg-surface p-4">
             <div>
@@ -381,10 +387,7 @@ export function UploadFlow() {
             ))}
           </select>
         </div>
-      </StepBlock>
-
-      {/* 步骤 2：文件上传（上传会话 → 直传 → 完成） */}
-      <StepBlock index={2} title="上传文件" tone="bg-cyan">
+        <h3 className="mb-2 mt-6 font-medium text-text-primary">上传文件</h3>
         <p className="text-sm text-text-secondary">
           支持 PDF、PNG/JPEG、DOCX/PPTX，单文件不超过 50 MiB。文件先进入私有隔离区，通过安全检查后才可用于发布。
         </p>
@@ -478,8 +481,8 @@ export function UploadFlow() {
         )}
       </StepBlock>
 
-      {/* 步骤 3：内容说明与来源声明 */}
-      <StepBlock index={3} title="填写说明与来源声明" tone="bg-violet">
+      {/* 步骤 2：内容说明与来源声明 */}
+      <StepBlock index={2} title="补充资料信息与来源" tone="bg-violet">
         <div className="grid gap-4">
           <div>
             <label htmlFor="upload-title" className="mb-1 block text-sm font-medium text-text-primary">
@@ -493,43 +496,48 @@ export function UploadFlow() {
               className="min-h-11 w-full border border-control-border bg-surface px-3 text-sm text-text-primary focus:border-brand focus:outline-2 focus:outline-offset-1 focus:outline-focus"
             />
           </div>
-          <div>
-            <label htmlFor="upload-desc" className="mb-1 block text-sm font-medium text-text-primary">
-              内容说明
-            </label>
-            <textarea
-              id="upload-desc"
-              value={description}
-              onChange={(event) => setDescription(event.target.value)}
-              rows={3}
-              maxLength={5000}
-              className="w-full border border-control-border bg-surface px-3 py-2 text-sm text-text-primary focus:border-brand focus:outline-2 focus:outline-offset-1 focus:outline-focus"
-            />
-          </div>
-          <div>
-            <label htmlFor="upload-change" className="mb-1 block text-sm font-medium text-text-primary">
-              版本变更说明（可选）
-            </label>
-            <input
-              id="upload-change"
-              value={changeSummary}
-              onChange={(event) => setChangeSummary(event.target.value)}
-              maxLength={2000}
-              className="min-h-11 w-full border border-control-border bg-surface px-3 text-sm text-text-primary focus:border-brand focus:outline-2 focus:outline-offset-1 focus:outline-focus"
-            />
-          </div>
-          <div>
-            <label htmlFor="upload-tags" className="mb-1 block text-sm font-medium text-text-primary">
-              标签（用逗号分隔，可选）
-            </label>
-            <input
-              id="upload-tags"
-              value={tagsInput}
-              onChange={(event) => setTagsInput(event.target.value)}
-              className="min-h-11 w-full border border-control-border bg-surface px-3 text-sm text-text-primary focus:border-brand focus:outline-2 focus:outline-offset-1 focus:outline-focus"
-            />
-          </div>
+          <details className="border border-divider p-3">
+            <summary className="cursor-pointer text-sm font-medium text-text-primary">补充说明、变更与标签（可选）</summary>
+            <div className="mt-3 space-y-4">
+              <div>
+                <label htmlFor="upload-desc" className="mb-1 block text-sm font-medium text-text-primary">
+                  内容说明
+                </label>
+                <textarea
+                  id="upload-desc"
+                  value={description}
+                  onChange={(event) => setDescription(event.target.value)}
+                  rows={3}
+                  maxLength={5000}
+                  className="w-full border border-control-border bg-surface px-3 py-2 text-sm text-text-primary focus:border-brand focus:outline-2 focus:outline-offset-1 focus:outline-focus"
+                />
+              </div>
+              <div>
+                <label htmlFor="upload-change" className="mb-1 block text-sm font-medium text-text-primary">
+                  版本变更说明（可选）
+                </label>
+                <input
+                  id="upload-change"
+                  value={changeSummary}
+                  onChange={(event) => setChangeSummary(event.target.value)}
+                  maxLength={2000}
+                  className="min-h-11 w-full border border-control-border bg-surface px-3 text-sm text-text-primary focus:border-brand focus:outline-2 focus:outline-offset-1 focus:outline-focus"
+                />
+              </div>
+              <div>
+                <label htmlFor="upload-tags" className="mb-1 block text-sm font-medium text-text-primary">
+                  标签（用逗号分隔，可选）
+                </label>
+                <input
+                  id="upload-tags"
+                  value={tagsInput}
+                  onChange={(event) => setTagsInput(event.target.value)}
+                  className="min-h-11 w-full border border-control-border bg-surface px-3 text-sm text-text-primary focus:border-brand focus:outline-2 focus:outline-offset-1 focus:outline-focus"
+                />
+              </div>
 
+            </div>
+          </details>
           <fieldset className="border border-divider p-4">
             <legend className="px-2 text-sm font-medium text-text-primary">来源声明（必填）</legend>
             <div className="space-y-3">
@@ -602,15 +610,9 @@ export function UploadFlow() {
         </div>
       </StepBlock>
 
-      {/* 步骤 4：保存草稿 / 提交审核（不同动作，文案准确） */}
-      <StepBlock index={4} title="保存或提交" tone="bg-amber">
-        <Notice tone="info" title="保存草稿与提交审核是两个不同动作">
-          <ul className="space-y-1">
-            <li>· 保存草稿：内容可以继续修改，不对其他用户可见。</li>
-            <li>· 提交审核：冻结当前版本快照交给审核员；通过后才会发布。</li>
-          </ul>
-        </Notice>
-
+      {/* 提交时自动保存；暂存草稿仍是独立操作。 */}
+      <StepBlock index={3} title="提交审核" tone="bg-amber">
+        <p className="text-sm text-text-secondary">提交会自动保存当前内容并交给审核员，通过后才会公开。还没准备好可以只保存草稿。</p>
         <div className="mt-4 flex flex-wrap gap-3">
           <Button variant="secondary" onClick={handleSaveDraft} isLoading={saving} disabled={!canSave}>
             保存草稿
@@ -619,22 +621,14 @@ export function UploadFlow() {
             variant="primary"
             onClick={handleSubmit}
             isLoading={submitting}
-            disabled={!created || !allScansPassed || savedFingerprint !== formFingerprint}
+            disabled={!canSave || !allScansPassed || saving}
           >
             提交审核
           </Button>
         </div>
-        {!created && (
-          <p className="mt-2 text-xs text-text-secondary">
-            请先保存草稿；保存成功后才能提交审核。
-          </p>
-        )}
-        {created && savedFingerprint !== formFingerprint && <p className="mt-2 text-xs text-text-secondary">内容已修改，请重新保存草稿后提交。</p>}
-        {created && !allScansPassed && (
-          <p className="mt-2 text-xs text-text-secondary">
-            仍有文件未通过安全检查，暂时不能提交审核。草稿已保存，可以稍后再来提交。
-          </p>
-        )}
+        <p className="mt-2 text-xs text-text-secondary" role="status">
+          {!course ? '请选择课程。' : !title.trim() ? '请填写资料标题。' : entries.length === 0 ? '请选择文件。' : !canSave ? '请等待所有文件上传完成，失败的文件可重试或移除。' : !allScansPassed ? '文件仍有安全检查未通过，可先保存草稿，稍后继续。' : '资料已就绪，可以提交审核。'}
+        </p>
         {created && (
           <p className="mt-2 text-xs text-text-secondary">
             草稿已保存（版本 {created.versionId.slice(0, 8)}…）。可在
@@ -645,7 +639,7 @@ export function UploadFlow() {
           </p>
         )}
       </StepBlock>
-    </div>
+    </fieldset>
   );
 }
 
