@@ -2,7 +2,7 @@
 
 import Link from 'next/link';
 import { useState } from 'react';
-import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { useInfiniteQuery, useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import toast from 'react-hot-toast';
 
 import { Notice } from '@/components/common/Notice';
@@ -42,13 +42,15 @@ export function RequestsClient({ initialCourse, initialOpen }: {
   const [formOpen, setFormOpen] = useState(initialOpen);
   const [followed, setFollowed] = useState<Record<string, boolean>>({});
 
-  const listQuery = useQuery({
-    queryKey: ['requests', statusFilter],
-    queryFn: () =>
-      listRequests({ status: statusFilter === 'all' ? undefined : 'open', limit: 20 }),
+  const listQuery = useInfiniteQuery({
+    initialPageParam: null as string | null,
+    queryKey: ['requests', statusFilter, initialCourse?.id],
+    queryFn: ({ pageParam }) =>
+      listRequests({ course_id: initialCourse?.id, cursor: pageParam, status: statusFilter === 'all' ? undefined : 'open', limit: 20 }),
+    getNextPageParam: page => page.has_more ? page.next_cursor : undefined,
   });
 
-  const items = listQuery.data?.items ?? [];
+  const items = listQuery.data?.pages.flatMap(page => page.items) ?? [];
   const courseNamesQuery = useQuery({
     queryKey: ['request-course-names', items.map((item) => item.course_id).join(',')],
     enabled: items.length > 0,
@@ -78,7 +80,7 @@ export function RequestsClient({ initialCourse, initialOpen }: {
         <h1 className="dn-display mt-2 text-3xl">求资料</h1>
         <p className="mt-3 max-w-2xl text-sm text-on-color">
           没找到的资料可以在这里提出需求；关注同一需求的人会合并计数，避免重复建单。
-          资料上传并通过审核后，需求会标记为已解决。
+          上传发布后可以提交为候选，由发起者或管理员核对并确认解决。
         </p>
       </header>
 
@@ -131,12 +133,12 @@ export function RequestsClient({ initialCourse, initialOpen }: {
           {describeError(listQuery.error).message}
         </Notice>
       ) : items.length > 0 ? (
-        <ul className="space-y-3">
+        <><ul className="space-y-3">
           {items.map((item) => (
             <li key={item.id} className="border border-divider bg-surface p-4">
               <div className="flex flex-wrap items-start justify-between gap-3">
                 <div className="min-w-0">
-                  <p className="text-sm text-text-primary">{item.description}</p>
+                  <p className="break-words text-sm text-text-primary">{item.description}</p><Link href={`/requests/${item.id}`} className="mt-2 inline-flex min-h-11 items-center text-sm text-brand underline">查看与处理需求</Link>
                   <p className="mt-1 text-xs text-text-secondary">
                     {courseNamesQuery.data?.[item.course_id] ? (
                       <Link
@@ -189,7 +191,7 @@ export function RequestsClient({ initialCourse, initialOpen }: {
               </div>
             </li>
           ))}
-        </ul>
+        </ul>{listQuery.hasNextPage && <Button variant="secondary" onClick={()=>listQuery.fetchNextPage()} isLoading={listQuery.isFetchingNextPage}>更多需求</Button>}</>
       ) : (
         <EmptyState
           title={statusFilter === 'open' ? '当前没有进行中的需求' : '还没有资料需求'}

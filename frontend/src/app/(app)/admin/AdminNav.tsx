@@ -18,7 +18,7 @@ export function AdminNav() {
     <nav aria-label="管理后台导航" className="border-b border-divider">
       <ul className="flex flex-wrap gap-1">
         {isAdmin(user) && <li><Link href="/admin/imports" aria-current={pathname === '/admin/imports' ? 'page' : undefined} className="flex min-h-11 items-center px-4 text-sm font-medium">批量上传</Link></li>}
-        {items.map((item) => {
+        {(isAdmin(user) ? [...items, {href:'/admin/comments',label:'评论管理'}, {href:'/admin/events',label:'失败事件'}] : items).map((item) => {
           const active = pathname === item.href || pathname.startsWith(`${item.href}/`);
           return (
             <li key={item.href}>

@@ -11,12 +11,28 @@ import uuid
 from fastapi import APIRouter, Depends, Query
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.core.deps import get_current_user, get_db
+from app.core.deps import get_current_user, get_db, get_request_id
+from app.core.permissions import JOB_RETRY, require
+from app.modules.notification.operations import EventRetry
 from app.core.pagination import CursorPage
 from app.modules.notification import service
 from app.modules.notification.schemas import NotificationItem, ReadAllResult, UnreadCount
 
 router = APIRouter(tags=["notification"])
+
+
+@router.get("/admin/events")
+async def failed_events(cursor: str | None = None, limit: int = Query(20, ge=1, le=100),
+    user=Depends(require(JOB_RETRY)), db: AsyncSession = Depends(get_db)):
+    from app.modules.notification.operations import list_events
+    return await list_events(db, cursor=cursor, limit=limit)
+
+
+@router.post("/admin/events/{event_id}/retry")
+async def retry_event(event_id: uuid.UUID, payload: EventRetry, user=Depends(require(JOB_RETRY)),
+    db: AsyncSession = Depends(get_db), trace=Depends(get_request_id)):
+    from app.modules.notification.operations import retry_event
+    return await retry_event(db, event_id=event_id, expected_attempts=payload.expected_attempts, user=user, trace=trace)
 
 
 @router.get("/notifications", response_model=CursorPage[NotificationItem])

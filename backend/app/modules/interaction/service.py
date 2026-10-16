@@ -10,7 +10,7 @@ import hashlib
 import re
 import uuid
 from datetime import datetime, timezone
-from typing import Any
+from typing import Any, Literal
 
 from sqlalchemy import bindparam, delete, func, or_, select, text
 from sqlalchemy.dialects.postgresql import insert as pg_insert
@@ -424,11 +424,9 @@ async def list_comments(
     resource_id: uuid.UUID,
     cursor: str | None,
     limit: int | None,
+    user=None,
 ) -> CursorPage[CommentItem]:
-    from app.modules.content.service import assert_visible, get_resource
-
-    resource = await get_resource(db, resource_id)
-    await assert_visible(db, resource)
+    await assert_comment_resource(db, resource_id=resource_id, user=user)
 
     page_size = normalize_page_size(limit)
     stmt = select(Comment).where(Comment.resource_id == resource_id)
@@ -464,17 +462,25 @@ async def create_comment(
     parent_id: uuid.UUID | None,
 ) -> CommentItem:
     """新增评论或回复。body 以纯文本存储，不作为任意 HTML 执行（§28）。"""
-    from app.modules.content.service import assert_visible, get_resource
+    from app.core.enums import AccountStatus
+    from app.modules.identity.service import get_user
 
-    resource = await get_resource(db, resource_id)
-    await assert_visible(db, resource)
+    user = await get_user(db, user_id)
+    if user.status != AccountStatus.ACTIVE:
+        raise Forbidden("当前账号不能发表评论")
+    await assert_comment_resource(db, resource_id=resource_id, user=user)
 
     if parent_id is not None:
         parent = (
-            await db.execute(select(Comment).where(Comment.id == parent_id))
+            await db.execute(select(Comment).where(Comment.id == parent_id)
+                             .with_for_update().execution_options(populate_existing=True))
         ).scalar_one_or_none()
         if parent is None or parent.resource_id != resource_id:
             raise InvalidInput("回复目标无效", details={"parent_id": str(parent_id)})
+        if parent.withdrawn_at is not None or parent.is_hidden:
+            raise Conflict("该评论已撤回或隐藏，不能继续回复")
+        if parent.parent_id is not None:
+            raise InvalidInput("仅支持回复主评论")
 
     comment = Comment(
         resource_id=resource_id, user_id=user_id, parent_id=parent_id, body=body
@@ -502,11 +508,33 @@ async def _comment_items(db: AsyncSession, comments: list[Comment]) -> list[Comm
                 user_id=comment.user_id,
                 display_name=name,
                 parent_id=comment.parent_id,
-                body=comment.body,
+                body=comment.body if comment.withdrawn_at is None and not comment.is_hidden else None,
                 created_at=comment.created_at,
+                status=comment_status(comment),
+                revision=comment.revision,
             )
         )
     return items
+
+
+def comment_status(comment: Comment) -> Literal["visible", "withdrawn", "hidden"]:
+    if comment.withdrawn_at is not None:
+        return "withdrawn"
+    return "hidden" if comment.is_hidden else "visible"
+
+
+async def assert_comment_resource(db: AsyncSession, *, resource_id: uuid.UUID, user) -> None:
+    from app.core.enums import Capability
+    from app.modules.content.service import assert_visible, get_resource
+    from app.modules.access.service import authorize
+
+    resource = await get_resource(db, resource_id)
+    await assert_visible(db, resource)
+    try:
+        await authorize(db, user=user, resource_id=resource_id,
+                        version_id=resource.published_version_id, capability=Capability.READ_METADATA)
+    except Forbidden as exc:
+        raise NotFound("资源不存在") from exc
 
 
 # =====================================================================
@@ -810,10 +838,16 @@ async def _ensure_request_follow(
     )
 
 
+async def request_followers(db, request_id):
+    return list((await db.scalars(select(ResourceRequestFollow.user_id).where(ResourceRequestFollow.request_id == request_id))).all())
+
+
 async def _request_item(
-    db: AsyncSession, request: ResourceRequest, follower_count: int | None = None
+    db: AsyncSession, request: ResourceRequest, follower_count: int | None = None, resolution=None
 ) -> RequestItem:
     count = follower_count if follower_count is not None else await _follower_count(db, request.id)
+    from app.modules.interaction.request_management import resolution_summary
+    resource_id, resource_title = resolution if resolution is not None else await resolution_summary(db, request.resolved_resource_id, request.course_id)
     return RequestItem(
         id=request.id,
         course_id=request.course_id,
@@ -821,8 +855,10 @@ async def _request_item(
         description=request.description,
         status=request.status,
         follower_count=count,
-        resolved_resource_id=request.resolved_resource_id,
+        resolved_resource_id=resource_id,
         created_at=request.created_at,
+        requester_id=request.requester_id, revision=request.revision, handled_at=request.handled_at,
+        resolution_available=resource_id is not None, resolved_resource_title=resource_title,
     )
 
 
@@ -913,8 +949,10 @@ async def list_requests(
     has_more = len(rows) > page_size
     rows = rows[:page_size]
 
+    from app.modules.interaction.request_management import public_summaries
+    summaries = await public_summaries(db, [(r.resolved_resource_id,r.course_id) for r,_ in rows])
     items = [
-        await _request_item(db, request, follower_count=int(count or 0))
+        await _request_item(db, request, follower_count=int(count or 0), resolution=summaries.get((request.resolved_resource_id,request.course_id),(None,None)))
         for request, count in rows
     ]
     next_cursor = (
@@ -956,8 +994,10 @@ async def list_my_requests(
     rows = list((await db.execute(stmt)).all())
     has_more = len(rows) > page_size
     rows = rows[:page_size]
+    from app.modules.interaction.request_management import public_summaries
+    summaries = await public_summaries(db, [(r.resolved_resource_id,r.course_id) for r,_ in rows])
     items = [
-        await _request_item(db, request, follower_count=int(count or 0))
+        await _request_item(db, request, follower_count=int(count or 0), resolution=summaries.get((request.resolved_resource_id,request.course_id),(None,None)))
         for request, count in rows
     ]
     next_cursor = (

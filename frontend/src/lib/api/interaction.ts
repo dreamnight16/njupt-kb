@@ -34,6 +34,14 @@ export interface SearchItem {
   rating: RatingSummary;
 }
 
+export interface RecommendationItem extends SearchItem {
+  reasons: string[];
+}
+
+export interface RecommendationsOut {
+  items: RecommendationItem[];
+}
+
 export interface FavoriteItem {
   resource_id: string;
   created_at: string;
@@ -50,8 +58,10 @@ export interface CommentItem {
   user_id: string;
   display_name: string;
   parent_id: string | null;
-  body: string;
+  body: string | null;
   created_at: string;
+  status: 'visible' | 'withdrawn' | 'hidden';
+  revision: number;
 }
 
 export interface CorrectionItem {
@@ -80,6 +90,30 @@ export interface RequestItem {
   follower_count: number;
   resolved_resource_id: string | null;
   created_at: string;
+  requester_id: string;
+  revision: number;
+  handled_at: string | null;
+  resolution_available: boolean;
+  resolved_resource_title: string | null;
+}
+
+export interface RequestResponseItem {
+  id: string; request_id: string; submitted_by: string;
+  resource_id: string | null; resource_title: string | null;
+  available: boolean; created_at: string;
+}
+
+export async function getRequest(id: string): Promise<RequestItem> {
+  return (await api.get(`/requests/${id}`)).data;
+}
+export async function changeRequestStatus(id: string, payload: { status: 'open' | 'fulfilled' | 'closed'; expected_revision: number; resource_id?: string; reason?: string }): Promise<RequestItem> {
+  return (await api.post(`/requests/${id}/status`, payload)).data;
+}
+export async function listRequestResponses(id: string, cursor?: string | null): Promise<CursorPage<RequestResponseItem>> {
+  return (await api.get(`/requests/${id}/responses`, { params: { cursor: cursor || undefined } })).data;
+}
+export async function submitRequestResponse(id: string, resourceId: string): Promise<RequestResponseItem> {
+  return (await api.post(`/requests/${id}/responses`, { resource_id: resourceId })).data;
 }
 
 export interface RequestCreateResult {
@@ -199,6 +233,18 @@ export async function createComment(
     parent_id: parentId ?? null,
   });
   return data;
+}
+
+export async function withdrawComment(resourceId: string, commentId: string, expectedRevision: number): Promise<CommentItem> {
+  return (await api.post<CommentItem>(`/resources/${resourceId}/comments/${commentId}/withdraw`, {
+    expected_revision: expectedRevision,
+  })).data;
+}
+
+export async function moderateComment(resourceId: string, commentId: string, expectedRevision: number, hidden: boolean, reason: string): Promise<CommentItem> {
+  return (await api.post<CommentItem>(`/resources/${resourceId}/comments/${commentId}/moderation`, {
+    expected_revision: expectedRevision, hidden, reason,
+  })).data;
 }
 
 export async function createCorrection(payload: {

@@ -420,6 +420,7 @@ class DomainEventType(StrEnum):
     CORRECTION_RESOLVED = "correction.resolved"
     REQUEST_CREATED = "request.created"
     REQUEST_FULFILLED = "request.fulfilled"
+    REQUEST_UPDATED = "request.updated"
     FILE_SCAN_FINISHED = "file.scan.finished"
     FILE_DERIVATIVE_READY = "file.derivative.ready"
     ORDER_PAID = "order.paid"

@@ -73,10 +73,14 @@ function newKey(): string {
   return `up-${Date.now()}-${Math.random().toString(16).slice(2)}`;
 }
 
-export function UploadFlow({ initialCourse = null }: { initialCourse?: Pick<CourseListItem, 'id' | 'name' | 'code' | 'college_name'> | null }) {
+export function UploadFlow({ initialCourse = null, initialType = 'note', requestId }: {
+  initialCourse?: Pick<CourseListItem, 'id' | 'name' | 'code' | 'college_name'> | null;
+  initialType?: ResourceType;
+  requestId?: string;
+}) {
   const [courseKeyword, setCourseKeyword] = useState('');
   const [course, setCourse] = useState<Pick<CourseListItem, 'id' | 'name' | 'code' | 'college_name'> | null>(initialCourse);
-  const [resourceType, setResourceType] = useState<ResourceType>('note');
+  const [resourceType, setResourceType] = useState<ResourceType>(initialType);
   const [entries, setEntries] = useState<FileEntry[]>([]);
   const [title, setTitle] = useState('');
   const [description, setDescription] = useState('');
@@ -298,6 +302,7 @@ export function UploadFlow({ initialCourse = null }: { initialCourse?: Pick<Cour
 
   if (submitted) return (
     <Notice tone="info" title="已提交审核">
+      {requestId && <p>资料审核发布后，请回到原需求提交候选，供发起者核对。</p>}{requestId && <Link href={`/requests/${requestId}`} className="block min-h-11 content-center text-brand underline">返回原需求</Link>}
       <p>审核通过后资料才会公开。你可以在我的资料中查看进度与审核意见。</p>
       <Link href="/me/resources" className="mt-3 inline-flex min-h-11 items-center bg-brand px-4 text-sm text-on-color">查看我的资料</Link>
     </Notice>
@@ -305,6 +310,7 @@ export function UploadFlow({ initialCourse = null }: { initialCourse?: Pick<Cour
 
   return (
     <fieldset disabled={saving || submitting} className="min-w-0 space-y-6">
+      {requestId && <Notice title="正在回应资料需求">上传与审核仍按正常流程进行，发布后请<Link className="underline" href={`/requests/${requestId}`}>返回需求提交候选</Link>，不会自动标记解决。</Notice>}
       {/* 步骤 1：课程与类型 */}
       <StepBlock index={1} title="选择课程与文件" tone="bg-brand">
         {course ? (
@@ -480,6 +486,12 @@ export function UploadFlow({ initialCourse = null }: { initialCourse?: Pick<Cour
           </div>
         )}
       </StepBlock>
+
+      {resourceType === 'guide' && (
+        <Notice tone="info" title="分享课程攻略">
+          请在攻略文件中写明适用学期、教师、学习路线和复习建议，并注明个人经验的适用范围。攻略同样需要来源声明和审核。
+        </Notice>
+      )}
 
       {/* 步骤 2：内容说明与来源声明 */}
       <StepBlock index={2} title="补充资料信息与来源" tone="bg-violet">

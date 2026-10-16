@@ -6,6 +6,7 @@ import type { CourseDetail } from '@/lib/api/catalog';
 import { serverFetch } from '@/lib/api/server';
 import { isUuid } from '@/lib/utils';
 import { UploadFlow } from '@/components/upload/UploadFlow';
+import { isResourceType } from '@/lib/api/types';
 
 export const metadata: Metadata = {
   title: '上传资料',
@@ -15,9 +16,10 @@ export const metadata: Metadata = {
 export const dynamic = 'force-dynamic';
 
 export default async function UploadPage({ searchParams }: {
-  searchParams: Promise<{ course_id?: string }>;
+  searchParams: Promise<{ course_id?: string; type?: string; request_id?: string }>;
 }) {
-  const { course_id } = await searchParams;
+  const { course_id, type, request_id } = await searchParams;
+  const initialType = type && isResourceType(type) ? type : 'note';
   const courseResult = course_id && isUuid(course_id)
     ? await serverFetch<CourseDetail>(`/courses/${course_id}`) : null;
   return (
@@ -31,7 +33,7 @@ export default async function UploadPage({ searchParams }: {
           </p>
         </header>
         {course_id && !courseResult?.data && <Notice tone="warning" title="未能带入课程">请重新搜索并选择课程。</Notice>}
-        <UploadFlow key={course_id ?? 'new'} initialCourse={courseResult?.data ?? null} />
+        <UploadFlow key={`${course_id ?? 'new'}-${initialType}`} initialCourse={courseResult?.data ?? null} initialType={initialType} requestId={request_id && isUuid(request_id) ? request_id : undefined} />
       </div>
     </AuthGuard>
   );

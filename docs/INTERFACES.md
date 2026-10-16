@@ -182,6 +182,40 @@ async def confirm_payment(db: AsyncSession, *, channel: str, payload: dict) -> P
 - `GET/PUT /me/creator-profile`：本人维护 `headline`、`bio`、`is_public`；不改变账号权限，写入 `creator.profile_updated` 审计。
 - 评论沿用既有 `GET/POST /resources/{id}/comments`；`parent_id` 表示一层回复，前端不做无限嵌套。
 
+## beta7 课程攻略与规则推荐
+
+- 课程攻略复用 `ResourceType.GUIDE`；读取使用 `GET /resources?course_id={id}&resource_type=guide`，保留游标分页。上传、来源声明、安全扫描、审核、修订、撤回与下载权限均沿用资料流程。
+- 前端 `/courses/{id}/guides` 提供攻略列表、空状态、错误状态与下一页；`/upload?course_id={id}&type=guide` 预选课程和类型，允许提交前修改。
+- `GET /recommendations?course_id={optional_uuid}&limit=6`：游客可用，`limit` 为 1–20；返回 `{items: RecommendationItem[]}`，固定前 N 条，不提供分页。`RecommendationItem` 在 `SearchItem` 上增加 `reasons: string[]`。
+- 实现入口 `interaction.recommendations.recommend_resources`；只读已发布、公开指针指向本资源已审核版本、元数据可见且未标记为 `outdated` 的内容。权限过滤在排序截断前完成，不返回原件地址。
+- 排序为：命中课程或贡献者关注 → 现行优先 → 收缩评分降序 → 收藏人数降序 → 更新时间降序 → 资源 ID 升序。评分复用既有先验 3.5、置信样本量 5；不引入下载计次或隐藏行为追踪。无关注记录时自然使用通用排序。
+- 理由根据实际命中条件生成，包含关注来源、课程范围、时效、评价样本量和收藏人数；不宣称“精品”或已核实质量。关闭关注、下架与权限变更在下一次请求生效。
+- 首页与课程详情分别加载推荐，失败显示提示；搜索、资料列表与上传入口保持可用。AI 与商业化开关不参与此流程。
+
+## beta8 评论治理
+
+- `GET /resources/{id}/comments` 增加当前会话的资料元数据权限检查；无权资料返回 404，保留原有升序游标和回复占位，不过滤掉已撤回/隐藏的记录。
+- `CommentItem.body` 改为 `string | null`，增加 `status: visible | withdrawn | hidden` 和 `revision: int`。撤回或隐藏后普通接口一律返回 `body=null`，包括作者和管理员；原文保存在数据库中。
+- `POST /resources/{rid}/comments/{cid}/withdraw`：`{expected_revision}`，仅 active 原作者可撤回；不可恢复。
+- `POST /resources/{rid}/comments/{cid}/moderation`：`{expected_revision, hidden, reason}`，仅 active 且有 `comment.moderate` 权限者可设置；当前仅管理员有此权限。理由去首尾空白，长度 1–500 字。
+- 同状态重试返回当前条目，不重复追加审计；改变状态时修订号不匹配返回 `409 STALE_REVISION`。作者撤回优先；隐藏后仍可撤回，撤回后管理员不能隐藏/恢复。
+- 新增评论/回复仅允许 active 账号；只支持回复正常的主评论。主评论状态变化保留已有正常回复，禁止新增回复。创建回复与治理共用目标评论的数据库行锁，事务内写入审计，不复制正文。
+- 实现位于 `interaction/comment_management.py`，状态字段由 `0003_beta8` 新增。升级需先迁移；结构降级会丢失治理状态，必须先停用公开评论读写并备份，不能直接回到忽略遮蔽字段的旧应用。
+- 界面在资料讨论区；未新增全站评论队列、评论举报/申诉模型或回复通知。求资料解决流程仍为设计候选，未提供占位接口。
+
+## beta9 P2 供需与运营闭环
+
+- `GET /requests/{id}`：需求详情，包含 `requester_id / revision / handled_at`。`resolution_available` 与 `resolved_resource_title` 表示当前公开解决资料摘要；资料下架/变私有/改课程后返回不可用，ID 与标题均为 null，不自动重开需求。
+- `POST /requests/{id}/status`：`status, expected_revision, resource_id?, reason?`。active 发起者或 `request.handle` 管理员可解决/关闭、重开已解决项；已关闭项仅管理员可重开。关闭/重开必填理由。同状态同资料重复提交不追加事件，其他过期快照 409。
+- `GET/POST /requests/{id}/responses`：候选列表游标分页；提交只需 `resource_id`，active 用户可操作。必须同课程、已发布、当前版本已审核且游客元数据可读；`(request_id, resource_id)` 唯一，重复回应不重复通知。非 open 需求拒绝新回应。
+- `GET /requests/{id}/resources`：按本课程列出公开资料供选择，支持 `keyword / cursor`；不绕过最终候选/解决校验。需求、本人需求和候选摘要采用批量公开性查询。
+- `request.updated` 事件按状态新修订号或候选记录 ID 去重。状态结果通知发起者与需求关注者，新候选通知发起者；通知正文不保存解决资料标题或敏感处理理由，详情读取时再判断可用性。
+- 资源发布通知合并课程/创作者关注并去重，跳过作者本人，仍校验收件人当前元数据权限。
+- `GET /admin/events`：`job.retry` 权限读取失败事件游标列表；只返回 ID、类型、状态、尝试次数、创建时间，不返回载荷或原始错误。`POST /admin/events/{id}/retry` 接收 `expected_attempts`，仅将失败项重置 pending，保留次数；后台随后消费，重复 pending 重试不新增通知。
+- `GET /admin/comments`：`comment.moderate` 权限，`hidden_only / cursor / limit`，仅已发布资料的评论；隐藏/撤回正文仍为 null，具体操作复用资料页。
+- 通知客户端按真实 `is_read` 字段读取；既有 `POST /notifications/read-all` 与单条已读接口补齐界面。需求、候选、通知、关注、本人需求补分页，新增 `/requests/{id}`、`/admin/comments`、`/admin/events` 页面。
+- `0004_beta9` 增加需求处理字段、候选表和事件类型约束。升级前备份；回退不静默删除新事件，旧事件约束不接受新类型时拒绝回退。AI、商业化与解决贡献奖励未启用。
+
 ## ai
 
 ```python

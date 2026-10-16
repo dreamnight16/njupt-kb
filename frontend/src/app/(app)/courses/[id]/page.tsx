@@ -4,6 +4,7 @@ import { notFound } from 'next/navigation';
 
 import { Notice } from '@/components/common/Notice';
 import { ResourceCard } from '@/components/resource/ResourceCard';
+import { Recommendations } from '@/components/resource/Recommendations';
 import { CourseFollowButton } from '@/components/catalog/CourseFollowButton';
 import type { CourseDetail, OfferingItem } from '@/lib/api/catalog';
 import type { ResourceListItem } from '@/lib/api/content';
@@ -118,6 +119,15 @@ export default async function CourseDetailPage({
         </Link>
       </div>
 
+      <section aria-label="课程攻略" className="border-y border-divider py-5">
+        <h2 className="dn-display text-2xl">课程攻略</h2>
+        <p className="mt-2 text-sm text-text-secondary">了解学习路线、复习方法和课程经验，注意核对适用学期与教师。</p>
+        <div className="mt-3 flex flex-wrap gap-4 text-sm">
+          <Link href={`/courses/${id}/guides`} className="min-h-11 content-center text-brand underline underline-offset-2">查看课程攻略</Link>
+          <Link href={`/upload?course_id=${id}&type=guide`} className="min-h-11 content-center text-brand underline underline-offset-2">分享课程攻略</Link>
+        </div>
+      </section>
+
       <section aria-labelledby="course-resources">
         <h2 id="course-resources" className="dn-display text-2xl">
           分类资料
@@ -176,6 +186,8 @@ export default async function CourseDetailPage({
           )}
         </div>
       </section>
+
+      <Recommendations courseId={id} />
 
       <details className="border border-divider bg-surface p-4">
         <summary className="cursor-pointer font-medium text-text-primary">课程介绍、培养方案与开课范围</summary>

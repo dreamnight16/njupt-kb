@@ -18,7 +18,7 @@ from collections.abc import Awaitable, Callable
 from datetime import datetime, timezone
 from typing import Any
 
-from sqlalchemy import and_, func, or_, select, text, update
+from sqlalchemy import Uuid, and_, bindparam, func, or_, select, text, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.enums import Capability, DomainEventType, NotificationType
@@ -394,7 +394,10 @@ async def _notify_published(
     title_text = version.title if version is not None else "资料"
 
     notifications: list[Notification] = []
-    for user_id in await _course_followers(session, resource.course_id):
+    creators = await session.execute(text("SELECT user_id FROM follows WHERE target_type = 'creator' AND target_id = :creator")
+                                     .bindparams(bindparam("creator", type_=Uuid())).columns(user_id=Uuid()), {"creator": resource.owner_id})
+    recipients = set(await _course_followers(session, resource.course_id)) | {row[0] for row in creators}
+    for user_id in recipients:
         if user_id == resource.owner_id:
             continue
         if version_id is None or not await _can_read(
@@ -477,7 +480,7 @@ async def _course_followers(session: AsyncSession, course_id: uuid.UUID) -> list
         text(
             "SELECT user_id FROM follows "
             "WHERE target_type = 'course' AND target_id = :course_id"
-        ),
+        ).bindparams(bindparam("course_id", type_=Uuid())).columns(user_id=Uuid()),
         {"course_id": course_id},
     )
     return [row[0] for row in rows]
@@ -511,6 +514,23 @@ async def _can_read(
         return False
 
 
+async def _notify_request_updated(session: AsyncSession, event: DomainEvent) -> list[Notification]:
+    from app.modules.interaction.request_management import get_request
+    from app.modules.interaction.service import request_followers
+    try:
+        row = await get_request(session, event.subject_id)
+    except NotFound:
+        return []
+    payload = event.payload or {}
+    response = payload.get("kind") == "response"
+    recipients = {row.requester_id} if response else set(await request_followers(session, row.id)) | {row.requester_id}
+    status = str(payload.get("status", "open"))
+    labels = {"open": "重新寻找资料", "fulfilled": "已确认解决", "closed": "已关闭"}
+    body = "你的资料需求收到新的候选资料，请核对后确认。" if response else f"你关注的资料需求{labels.get(status, '状态已更新')}。"
+    return [_build(uid, NotificationType.REQUEST_UPDATED, "资料需求有更新", body,
+                   {"request_id": str(row.id), "course_id": str(row.course_id)}) for uid in recipients]
+
+
 _EVENT_HANDLERS: dict[str, _EventHandler] = {
     DomainEventType.RESOURCE_VERSION_SUBMITTED.value: _notify_version_submitted,
     DomainEventType.RESOURCE_VERSION_APPROVED.value: _notify_review_result,
@@ -518,6 +538,7 @@ _EVENT_HANDLERS: dict[str, _EventHandler] = {
     DomainEventType.RESOURCE_PUBLISHED.value: _notify_published,
     DomainEventType.RESOURCE_WITHDRAWN.value: _notify_withdrawn,
     DomainEventType.REPORT_RESOLVED.value: _notify_report_resolved,
+    DomainEventType.REQUEST_UPDATED.value: _notify_request_updated,
 }
 
 

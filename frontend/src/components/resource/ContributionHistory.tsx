@@ -1,7 +1,7 @@
 'use client';
 
 import Link from 'next/link';
-import { useQuery } from '@tanstack/react-query';
+import { useInfiniteQuery, useQuery } from '@tanstack/react-query';
 
 import { Notice } from '@/components/common/Notice';
 import { Button } from '@/components/ui/Button';
@@ -15,9 +15,11 @@ export function ContributionHistory() {
     queryKey: ['my-corrections'],
     queryFn: () => listMyCorrections(),
   });
-  const requestsQuery = useQuery({
+  const requestsQuery = useInfiniteQuery({
+    initialPageParam: null as string | null,
     queryKey: ['my-requests'],
-    queryFn: () => listMyRequests(),
+    queryFn: ({pageParam}) => listMyRequests(pageParam),
+    getNextPageParam: page => page.has_more ? page.next_cursor : undefined,
   });
 
   return (
@@ -41,7 +43,7 @@ export function ContributionHistory() {
             <ul className="space-y-3">
               {correctionsQuery.data.items.map((item) => (
                 <li key={item.id} className="border border-divider bg-surface p-4">
-                  <p className="text-sm text-text-primary">{item.description}</p>
+                  <p className="text-sm text-text-primary">{item.description}</p><Link className="inline-flex min-h-11 items-center text-brand underline" href={`/resources/${item.resource_id}`}>查看资料</Link>
                   <p className="mt-1 text-xs text-text-secondary">
                     状态：{item.status} · 提交于 {formatDateTime(item.created_at)}
                   </p>
@@ -74,18 +76,18 @@ export function ContributionHistory() {
             >
               {describeError(requestsQuery.error).message}
             </Notice>
-          ) : requestsQuery.data && requestsQuery.data.items.length > 0 ? (
-            <ul className="space-y-3">
-              {requestsQuery.data.items.map((item) => (
+          ) : requestsQuery.data && requestsQuery.data.pages.flatMap(page => page.items).length > 0 ? (
+            <><ul className="space-y-3">
+              {requestsQuery.data.pages.flatMap(page => page.items).map((item) => (
                 <li key={item.id} className="border border-divider bg-surface p-4">
-                  <p className="text-sm text-text-primary">{item.description}</p>
+                  <p className="text-sm text-text-primary">{item.description}</p><Link className="inline-flex min-h-11 items-center text-brand underline" href={`/requests/${item.id}`}>查看与处理</Link>
                   <p className="mt-1 text-xs text-text-secondary">
                     状态：{item.status} · {item.follower_count} 人关注 · 发布于{' '}
                     {formatDateTime(item.created_at)}
                   </p>
                 </li>
               ))}
-            </ul>
+            </ul>{requestsQuery.hasNextPage && <Button onClick={()=>requestsQuery.fetchNextPage()} isLoading={requestsQuery.isFetchingNextPage}>更多我的需求</Button>}</>
           ) : (
             <Notice tone="info" title="还没有发布过资料需求">
               可以在<Link href="/requests" className="underline underline-offset-2">求资料</Link>

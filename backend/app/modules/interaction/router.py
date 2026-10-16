@@ -14,11 +14,13 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.deps import get_current_user, get_db, get_optional_user, get_request_id
 from app.core.enums import CorrectionStatus, ResourceType
 from app.core.pagination import CursorPage
-from app.core.permissions import CATALOG_MANAGE, CORRECTION_HANDLE, require
+from app.core.permissions import CATALOG_MANAGE, COMMENT_MODERATE, CORRECTION_HANDLE, require
 from app.modules.interaction import service
 from app.modules.interaction.schemas import (
     CommentCreate,
     CommentItem,
+    CommentWithdraw,
+    CommentModeration,
     CorrectionCreate,
     CorrectionItem,
     CorrectionStatusUpdate,
@@ -31,10 +33,26 @@ from app.modules.interaction.schemas import (
     RequestCreate,
     RequestCreateResult,
     RequestItem,
+    RequestStatusUpdate,
+    RequestResponseCreate,
+    RequestResponseItem,
     SearchItem,
+    RecommendationsOut,
 )
 
 router = APIRouter(tags=["interaction"])
+
+
+@router.get("/recommendations", response_model=RecommendationsOut)
+async def recommend_resources(
+    course_id: uuid.UUID | None = None,
+    limit: int = Query(default=6, ge=1, le=20),
+    user=Depends(get_optional_user),
+    db: AsyncSession = Depends(get_db),
+) -> RecommendationsOut:
+    from app.modules.interaction.recommendations import recommend_resources as recommend
+
+    return await recommend(db, user=user, course_id=course_id, limit=limit)
 
 
 # --- 搜索（§19）---
@@ -145,9 +163,10 @@ async def list_comments(
     resource_id: uuid.UUID,
     cursor: str | None = None,
     limit: int | None = Query(default=None, ge=1, le=100),
+    user=Depends(get_optional_user),
     db: AsyncSession = Depends(get_db),
 ) -> CursorPage[CommentItem]:
-    return await service.list_comments(db, resource_id=resource_id, cursor=cursor, limit=limit)
+    return await service.list_comments(db, resource_id=resource_id, cursor=cursor, limit=limit, user=user)
 
 
 @router.post(
@@ -168,6 +187,39 @@ async def create_comment(
         body=payload.body,
         parent_id=payload.parent_id,
     )
+
+
+@router.post("/resources/{resource_id}/comments/{comment_id}/withdraw", response_model=CommentItem)
+async def withdraw_comment(
+    resource_id: uuid.UUID, comment_id: uuid.UUID, payload: CommentWithdraw,
+    user=Depends(get_current_user), db: AsyncSession = Depends(get_db),
+    request_id: str = Depends(get_request_id),
+) -> CommentItem:
+    from app.modules.interaction.comment_management import manage_comment
+
+    return await manage_comment(db, user=user, resource_id=resource_id, comment_id=comment_id,
+                                expected_revision=payload.expected_revision, request_id=request_id)
+
+
+@router.get("/admin/comments", response_model=CursorPage[CommentItem])
+async def managed_comments(hidden_only: bool = False, cursor: str | None = None,
+    limit: int = Query(20, ge=1, le=100), user=Depends(require(COMMENT_MODERATE)),
+    db: AsyncSession = Depends(get_db)):
+    from app.modules.interaction.comment_management import list_managed_comments
+    return await list_managed_comments(db, hidden_only=hidden_only, cursor=cursor, limit=limit)
+
+
+@router.post("/resources/{resource_id}/comments/{comment_id}/moderation", response_model=CommentItem)
+async def moderate_comment(
+    resource_id: uuid.UUID, comment_id: uuid.UUID, payload: CommentModeration,
+    user=Depends(require(COMMENT_MODERATE)), db: AsyncSession = Depends(get_db),
+    request_id: str = Depends(get_request_id),
+) -> CommentItem:
+    from app.modules.interaction.comment_management import manage_comment
+
+    return await manage_comment(db, user=user, resource_id=resource_id, comment_id=comment_id,
+                                expected_revision=payload.expected_revision, hidden=payload.hidden,
+                                reason=payload.reason, request_id=request_id)
 
 
 # --- 关注（§20.2）---
@@ -349,3 +401,39 @@ async def list_my_requests(
 
 # 贡献者公开主页（§24.1）由 creator 模块的 GET /creators/{user_id} 提供，
 # 本模块不再注册同路径路由，避免同名路由互相遮蔽。
+
+
+@router.get("/requests/{request_id}", response_model=RequestItem)
+async def request_detail(request_id: uuid.UUID, db: AsyncSession = Depends(get_db)):
+    from app.modules.interaction.request_management import request_detail
+    return await request_detail(db, request_id)
+
+
+@router.post("/requests/{request_id}/status", response_model=RequestItem)
+async def change_request_status(request_id: uuid.UUID, payload: RequestStatusUpdate,
+    user=Depends(get_current_user), db: AsyncSession = Depends(get_db), trace=Depends(get_request_id)):
+    from app.modules.interaction.request_management import change_status
+    return await change_status(db, user=user, request_id=request_id, payload=payload, request_trace_id=trace)
+
+
+@router.get("/requests/{request_id}/responses", response_model=CursorPage[RequestResponseItem])
+async def request_responses(request_id: uuid.UUID, cursor: str | None = None,
+    limit: int | None = Query(None, ge=1, le=100), db: AsyncSession = Depends(get_db)):
+    from app.modules.interaction.request_management import list_responses
+    return await list_responses(db, request_id, cursor=cursor, limit=limit)
+
+
+@router.get("/requests/{request_id}/resources")
+async def request_resource_choices(request_id: uuid.UUID, keyword: str | None = None,
+    cursor: str | None = None, db: AsyncSession = Depends(get_db)):
+    from app.modules.interaction.request_management import get_request
+    from app.modules.content.service import list_resources
+    row = await get_request(db, request_id)
+    return await list_resources(db, user=None, course_id=row.course_id, keyword=keyword, cursor=cursor, limit=20)
+
+
+@router.post("/requests/{request_id}/responses", response_model=RequestResponseItem)
+async def respond_to_request(request_id: uuid.UUID, payload: RequestResponseCreate,
+    user=Depends(get_current_user), db: AsyncSession = Depends(get_db)):
+    from app.modules.interaction.request_management import respond
+    return await respond(db, user=user, request_id=request_id, resource_id=payload.resource_id)

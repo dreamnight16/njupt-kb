@@ -5,6 +5,7 @@ import { CourseCard } from '@/components/catalog/CourseCard';
 import { Notice } from '@/components/common/Notice';
 import { SearchBox } from '@/components/common/SearchBox';
 import { ResourceCard } from '@/components/resource/ResourceCard';
+import { Recommendations } from '@/components/resource/Recommendations';
 import type { CourseListItem } from '@/lib/api/catalog';
 import type { SearchItem } from '@/lib/api/interaction';
 import { serverFetch } from '@/lib/api/server';
@@ -95,6 +96,8 @@ export default async function HomePage() {
           </Notice>
         )}
       </section>
+
+      <Recommendations />
 
       <section aria-labelledby="recent-resources">
         <div className="mb-4 flex items-end justify-between gap-4">

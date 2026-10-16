@@ -8,7 +8,7 @@ from __future__ import annotations
 
 import uuid
 from datetime import datetime
-from typing import Any
+from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
@@ -87,8 +87,26 @@ class CommentItem(BaseModel):
     user_id: uuid.UUID
     display_name: str
     parent_id: uuid.UUID | None = None
-    body: str
+    body: str | None
     created_at: datetime
+    status: Literal["visible", "withdrawn", "hidden"] = "visible"
+    revision: int = 1
+
+
+class CommentWithdraw(_InputModel):
+    expected_revision: int = Field(ge=1)
+
+
+class CommentModeration(CommentWithdraw):
+    hidden: bool
+    reason: str = Field(min_length=1, max_length=500)
+
+    @field_validator("reason")
+    @classmethod
+    def _strip_reason(cls, value: str) -> str:
+        if not value.strip():
+            raise ValueError("请填写处理理由")
+        return value.strip()
 
 
 # --- 纠错（§20.2）---
@@ -164,6 +182,32 @@ class RequestItem(BaseModel):
     follower_count: int
     resolved_resource_id: uuid.UUID | None = None
     created_at: datetime
+    requester_id: uuid.UUID
+    revision: int
+    handled_at: datetime | None = None
+    resolution_available: bool = False
+    resolved_resource_title: str | None = None
+
+
+class RequestStatusUpdate(_InputModel):
+    status: Literal["open", "fulfilled", "closed"]
+    expected_revision: int = Field(ge=1)
+    resource_id: uuid.UUID | None = None
+    reason: str | None = Field(default=None, max_length=500)
+
+
+class RequestResponseCreate(_InputModel):
+    resource_id: uuid.UUID
+
+
+class RequestResponseItem(BaseModel):
+    id: uuid.UUID
+    request_id: uuid.UUID
+    submitted_by: uuid.UUID
+    resource_id: uuid.UUID | None
+    resource_title: str | None
+    available: bool
+    created_at: datetime
 
 
 class RequestCreateResult(BaseModel):
@@ -193,3 +237,11 @@ class SearchItem(BaseModel):
     freshness_status: str | None = None
     published_version_id: uuid.UUID | None = None
     rating: RatingSummary
+
+
+class RecommendationItem(SearchItem):
+    reasons: list[str]
+
+
+class RecommendationsOut(BaseModel):
+    items: list[RecommendationItem]

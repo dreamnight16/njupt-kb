@@ -22,6 +22,8 @@ RESOURCE_REVIEW = "resource.review"
 RESOURCE_PUBLISH = "resource.publish"
 REPORT_HANDLE = "report.handle"
 CORRECTION_HANDLE = "correction.handle"
+COMMENT_MODERATE = "comment.moderate"
+REQUEST_HANDLE = "request.handle"
 CATALOG_MANAGE = "catalog.manage"
 USER_SUSPEND = "user.suspend"
 ENTITLEMENT_GRANT = "entitlement.grant"
@@ -40,6 +42,8 @@ ALL_PERMISSIONS: frozenset[str] = frozenset(
         RESOURCE_PUBLISH,
         REPORT_HANDLE,
         CORRECTION_HANDLE,
+        COMMENT_MODERATE,
+        REQUEST_HANDLE,
         CATALOG_MANAGE,
         USER_SUSPEND,
         ENTITLEMENT_GRANT,

@@ -1,7 +1,7 @@
 'use client';
 
 import Link from 'next/link';
-import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { useMutation, useInfiniteQuery, useQueryClient } from '@tanstack/react-query';
 import toast from 'react-hot-toast';
 
 import { Notice } from '@/components/common/Notice';
@@ -11,12 +11,17 @@ import { SkeletonList } from '@/components/ui/Skeleton';
 import { describeError } from '@/lib/api/client';
 import { listFollows, removeFollow, type FollowItem } from '@/lib/api/interaction';
 import { formatDateTime } from '@/lib/utils';
+import { useAuthStore } from '@/stores/authStore';
 
 export default function MyFollowsPage() {
   const queryClient = useQueryClient();
-  const query = useQuery({
-    queryKey: ['follows'],
-    queryFn: () => listFollows(),
+  const user = useAuthStore(s => s.user);
+  const query = useInfiniteQuery({
+    initialPageParam: null as string | null,
+    queryKey: ['follows', user?.id],
+    enabled: !!user,
+    queryFn: ({pageParam}) => listFollows({cursor:pageParam}),
+    getNextPageParam: page => page.has_more ? page.next_cursor : undefined,
   });
 
   const removeMutation = useMutation({
@@ -45,9 +50,9 @@ export default function MyFollowsPage() {
         >
           {describeError(query.error).message}
         </Notice>
-      ) : query.data && query.data.items.length > 0 ? (
-        <ul className="space-y-3">
-          {query.data.items.map((item) => {
+      ) : query.data && query.data.pages.flatMap(page => page.items).length > 0 ? (
+        <><ul className="space-y-3">
+          {query.data.pages.flatMap(page => page.items).map((item) => {
             const courseName =
               item.target_type === 'course'
                 ? ((item.target?.name as string | undefined) ?? null)
@@ -99,7 +104,7 @@ export default function MyFollowsPage() {
               </li>
             );
           })}
-        </ul>
+        </ul>{query.hasNextPage && <Button onClick={()=>query.fetchNextPage()} isLoading={query.isFetchingNextPage}>更多关注</Button>}</>
       ) : (
         <EmptyState
           title="还没有关注任何课程或创作者"
