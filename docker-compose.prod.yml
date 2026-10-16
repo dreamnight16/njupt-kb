@@ -94,6 +94,8 @@ services:
     restart: always
 
   worker:
+    env_file:
+      - .env
     build:
       context: ./backend
       dockerfile: Dockerfile.worker

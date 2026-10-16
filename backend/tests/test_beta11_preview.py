@@ -12,6 +12,7 @@
 """
 
 import io
+import hashlib
 import unittest
 from contextlib import ExitStack
 from datetime import datetime, timedelta, timezone
@@ -59,6 +60,7 @@ class Beta11PreviewTests(unittest.IsolatedAsyncioTestCase):
             original_name="test.pdf",
             detected_mime="application/pdf",
             size=len(PDF_BYTES),
+            sha256=hashlib.sha256(PDF_BYTES).hexdigest(),
             scan_status=ScanStatus.PASSED.value,
         )
         self.db.add(self.file)

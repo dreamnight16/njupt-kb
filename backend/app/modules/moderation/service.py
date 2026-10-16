@@ -18,7 +18,7 @@ import uuid
 from datetime import datetime, timezone
 from typing import TYPE_CHECKING, Sequence
 
-from sqlalchemy import Integer, String, Uuid, column, func, select, table, tuple_, update
+from sqlalchemy import func, select, update
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -42,7 +42,7 @@ from app.core.errors import (
     RateLimited,
 )
 from app.core.events import emit_event
-from app.core.pagination import CursorPage, decode_cursor, encode_cursor, normalize_page_size
+from app.core.pagination import CursorPage, encode_cursor, normalize_page_size, seek_descending
 from app.core.permissions import RESOURCE_REVIEW, has_permission
 from app.core.ratelimit import check_rate_limit
 from app.modules.moderation.models import (
@@ -123,17 +123,7 @@ async def _page(
 ):
     """按 (时间戳, id) 降序的游标分页，默认 20、上限 100（§25.1）。"""
     size = normalize_page_size(limit)
-    if cursor:
-        payload = decode_cursor(cursor)
-        try:
-            last_ts = datetime.fromisoformat(payload["ts"])
-            last_id = uuid.UUID(payload["id"])
-        except (KeyError, TypeError, ValueError) as exc:
-            raise InvalidInput("cursor 无效", details={"reason": "malformed"}) from exc
-        if last_ts.tzinfo is None:
-            last_ts = last_ts.replace(tzinfo=timezone.utc)
-        stmt = stmt.where(tuple_(ts_attr, model.id) < tuple_(last_ts, last_id))
-    stmt = stmt.order_by(ts_attr.desc(), model.id.desc()).limit(size + 1)
+    stmt = seek_descending(db, stmt, ts_attr, model.id, cursor).limit(size + 1)
     rows = list((await db.execute(stmt)).scalars().all())
     has_more = len(rows) > size
     rows = rows[:size]
@@ -1009,22 +999,9 @@ async def set_account_restriction(
     request_id: str,
 ) -> None:
     """暂停/恢复账号。封禁时撤销全部会话（§14.1、§14.2）。"""
-    from app.modules.identity import service as identity_service
-    from app.modules.identity.service import get_user, revoke_all_sessions
-
-    target = await get_user(db, user_id)
+    from app.modules.identity.service import revoke_all_sessions, set_account_status
     status = AccountStatus.SUSPENDED if suspend else AccountStatus.ACTIVE
-    before_status = str(getattr(target, "status", ""))
-
-    handler = getattr(identity_service, "set_account_status", None)
-    if handler is None:
-        # 契约缺口：INTERFACES.md 未声明账号状态变更函数。显式失败而非静默成功（§25.2）。
-        raise DependencyUnavailable(
-            "identity 模块尚未提供账号状态变更服务",
-            details={"expected": "identity.service.set_account_status"},
-        )
-
-    await handler(
+    before_status = await set_account_status(
         db,
         user_id=user_id,
         status=status,

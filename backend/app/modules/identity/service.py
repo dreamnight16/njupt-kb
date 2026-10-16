@@ -48,6 +48,28 @@ from app.modules.identity.schemas import ActionMessage, MeResponse, SessionItem
 
 logger = logging.getLogger("app.identity")
 
+
+async def set_account_status(db: AsyncSession, *, user_id: uuid.UUID, status: AccountStatus,
+    reason: str | None, actor_id: uuid.UUID, request_id: str) -> str:
+    """人工暂停/恢复的唯一写入口；调用方负责同事务审计和会话撤销。"""
+    actor = await db.get(User, actor_id)
+    if actor is None or actor.role != Role.ADMIN or actor.status != AccountStatus.ACTIVE:
+        raise Forbidden("需要有效管理员账号")
+    target = await db.scalar(select(User).where(User.id == user_id).with_for_update().execution_options(populate_existing=True))
+    if target is None:
+        raise NotFound("账号不存在")
+    if target.id == actor_id or target.role == Role.ADMIN:
+        raise Forbidden("不能在此暂停或恢复管理员账号")
+    if not reason or not reason.strip():
+        raise InvalidInput("请填写处理理由")
+    expected = AccountStatus.ACTIVE if status == AccountStatus.SUSPENDED else AccountStatus.SUSPENDED
+    if status not in (AccountStatus.ACTIVE, AccountStatus.SUSPENDED) or target.status != expected:
+        raise Conflict("账号状态已变化，或不支持此状态流转", code="ACCOUNT_STATE_CHANGED")
+    before = target.status
+    target.status = status.value
+    await db.flush()
+    return before
+
 # 配置中没有对应字段，故在此声明令牌有效期与失败延迟这两个业务常量。
 EMAIL_VERIFICATION_TTL_HOURS = 24
 PASSWORD_RESET_TTL_MINUTES = 30

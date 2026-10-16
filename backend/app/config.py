@@ -99,6 +99,10 @@ class Settings(BaseSettings):
     PREVIEW_THUMBNAIL_WIDTH: int = 1000
     LIBREOFFICE_BIN: str = "soffice"
     DERIVATIVE_TIMEOUT_SECONDS: int = 180
+    MAX_DOCUMENT_PAGES: int = Field(default=1000, ge=1)
+    MAX_IMAGE_PIXELS: int = Field(default=25_000_000, ge=1)
+    MAX_ARCHIVE_ENTRIES: int = Field(default=2000, ge=1)
+    MAX_ARCHIVE_UNPACKED_BYTES: int = Field(default=250 * 1024 * 1024, ge=1)
 
     # --- beta11 第一页图片预览与用户水印（prevew.md）---
     # 图片预览默认只渲染第一页：浏览器拿到的是 page1.webp，不是完整 PDF（prevew.md 五）。

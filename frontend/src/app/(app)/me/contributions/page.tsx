@@ -19,6 +19,7 @@ import {
 } from '@/lib/api/creator';
 import { formatDateTime } from '@/lib/utils';
 import { useAuthStore } from '@/stores/authStore';
+import { CreatorStats } from '@/components/workspace/PersonalOverview';
 
 export default function MyContributionsPage() {
   const user = useAuthStore((s) => s.user);
@@ -30,6 +31,7 @@ export default function MyContributionsPage() {
 
   return (
     <div className="space-y-8">
+      <CreatorStats />
       <Notice tone="info" title="贡献与收益分开">
         贡献记录用于展示与运营，不承诺兑换现金。
       </Notice>

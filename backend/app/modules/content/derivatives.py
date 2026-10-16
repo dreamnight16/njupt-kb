@@ -26,7 +26,7 @@ from app.config import settings
 from app.core.enums import DerivativeKind
 from app.modules.content.scanning import DOCX_MIME, JPEG_MIME, PDF_MIME, PNG_MIME, PPTX_MIME
 
-PROCESSOR_VERSION = "derive/1"
+PROCESSOR_VERSION = "derive/2"
 
 
 class DerivativeError(Exception):
@@ -63,6 +63,8 @@ def _make_preview_pdf(source: Path, workdir: Path) -> DerivativeArtifact:
     total = len(reader.pages)
     if total == 0:
         raise DerivativeError("PDF 没有页面")
+    if total > settings.MAX_DOCUMENT_PAGES:
+        raise DerivativeError("PDF 页数超过上限")
     limit = min(total, max(1, settings.PREVIEW_MAX_PAGES))
     writer = PdfWriter()
     for index in range(limit):
@@ -77,12 +79,21 @@ def _render_pdf_thumbnail(source: Path, workdir: Path) -> DerivativeArtifact:
     import pypdfium2 as pdfium
 
     document = pdfium.PdfDocument(str(source))
-    if len(document) == 0:
-        raise DerivativeError("PDF 没有页面")
-    page = document[0]
-    width_pt, _ = page.get_size()
-    scale = max(0.1, settings.PREVIEW_THUMBNAIL_WIDTH / max(1.0, width_pt))
-    image = page.render(scale=scale).to_pil().convert("RGB")
+    try:
+        if not 1 <= len(document) <= settings.MAX_DOCUMENT_PAGES:
+            raise DerivativeError("PDF 页数不符合限制")
+        page = document[0]
+        width_pt, height_pt = page.get_size()
+        if min(width_pt, height_pt) <= 0:
+            raise DerivativeError("页面尺寸无效")
+        bitmap = page.render(scale=settings.PREVIEW_THUMBNAIL_WIDTH / max(width_pt, height_pt))
+        try:
+            image = bitmap.to_pil().convert("RGB")
+        finally:
+            bitmap.close()
+            page.close()
+    finally:
+        document.close()
     target = workdir / "thumb.png"
     image.save(target, format="PNG", optimize=True)
     return DerivativeArtifact(DerivativeKind.THUMBNAIL, target, "image/png", 1)
@@ -92,7 +103,10 @@ def _image_thumbnail(source: Path, workdir: Path) -> DerivativeArtifact:
     from PIL import Image
 
     with Image.open(source) as image:
+        if image.width * image.height > settings.MAX_IMAGE_PIXELS:
+            raise DerivativeError("图片像素超过上限")
         converted = image.convert("RGB")
+        converted.info.clear()
         side = settings.PREVIEW_THUMBNAIL_WIDTH
         converted.thumbnail((side, side))
         target = workdir / "thumb.png"
@@ -208,7 +222,9 @@ def _watermarked_webp(
         watermarked = _apply_watermark(image.convert("RGBA"), watermark_text)
         target = workdir / "preview.webp"
         # 图片由服务端重新渲染/缩放生成，不携带原件元数据（prevew.md 四）。
-        watermarked.convert("RGB").save(
+        output = watermarked.convert("RGB")
+        output.info.clear()
+        output.save(
             target, format="WEBP", quality=settings.PREVIEW_IMAGE_QUALITY
         )
     except Exception:  # noqa: BLE001 - 生成失败回退既有预览，不阻断预览链路（§13.1）
@@ -229,7 +245,7 @@ def _pdf_first_page_image(
     document = None
     try:
         document = pdfium.PdfDocument(str(source))
-        if len(document) == 0:
+        if not 1 <= len(document) <= settings.MAX_DOCUMENT_PAGES:
             return None
         page = document[0]
         width_pt, height_pt = page.get_size()
@@ -260,6 +276,8 @@ def _image_first_page(
 
     try:
         with Image.open(source) as opened:
+            if opened.width * opened.height > settings.MAX_IMAGE_PIXELS:
+                return None
             image = opened.convert("RGBA")
             image.thumbnail((settings.PREVIEW_IMAGE_WIDTH, settings.PREVIEW_IMAGE_WIDTH))
     except Exception:  # noqa: BLE001 - 解码失败回退既有预览

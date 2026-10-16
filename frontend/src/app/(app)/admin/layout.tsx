@@ -11,7 +11,7 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
       <div className="space-y-6">
         <header>
           <p className="dn-kicker text-text-secondary">MODERATION</p>
-          <h1 className="dn-display mt-1 text-3xl">审核后台</h1>
+          <h1 className="dn-display mt-1 text-3xl">管理后台</h1>
         </header>
         <AdminNav />
         {children}

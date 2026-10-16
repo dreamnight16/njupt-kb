@@ -25,7 +25,7 @@ import logging
 import uuid
 from datetime import datetime, timedelta, timezone
 
-from sqlalchemy import select, tuple_, update
+from sqlalchemy import select, update
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -41,7 +41,7 @@ from app.core.errors import (
     NotFound,
     RateLimited,
 )
-from app.core.pagination import CursorPage, decode_cursor, encode_cursor, normalize_page_size
+from app.core.pagination import CursorPage, encode_cursor, normalize_page_size, seek_descending
 from app.db import async_session_factory
 from app.modules.jobs.models import Job
 from app.modules.jobs.schemas import JobFailureOut, JobOut
@@ -61,8 +61,8 @@ __all__ = [
 # 每个任务类别绑定一个处理器版本，参与幂等约束（§22.2）。
 # file.derive 与 content.derivatives.PROCESSOR_VERSION 保持一致，避免重复派生记录。
 PROCESSOR_VERSIONS: dict[JobType, str] = {
-    JobType.FILE_SCAN: "scan/1",
-    JobType.FILE_DERIVE: "derive/1",
+    JobType.FILE_SCAN: "scan/2",
+    JobType.FILE_DERIVE: "derive/2",
     JobType.NOTIFICATION_DISPATCH: "notify/1",
     JobType.EVENT_FANOUT: "fanout/1",
     JobType.AI_PROCESS: "ai/1",
@@ -511,17 +511,7 @@ async def dispatch_due_jobs() -> dict:
 async def _page(db: AsyncSession, stmt, *, limit: int | None, cursor: str | None):
     """按 (created_at, id) 降序的游标分页，默认 20、上限 100（§25.1）。"""
     size = normalize_page_size(limit)
-    if cursor:
-        payload = decode_cursor(cursor)
-        try:
-            last_ts = datetime.fromisoformat(payload["ts"])
-            last_id = uuid.UUID(payload["id"])
-        except (KeyError, TypeError, ValueError) as exc:
-            raise InvalidInput("cursor 无效", details={"reason": "malformed"}) from exc
-        if last_ts.tzinfo is None:
-            last_ts = last_ts.replace(tzinfo=timezone.utc)
-        stmt = stmt.where(tuple_(Job.created_at, Job.id) < tuple_(last_ts, last_id))
-    stmt = stmt.order_by(Job.created_at.desc(), Job.id.desc()).limit(size + 1)
+    stmt = seek_descending(db, stmt, Job.created_at, Job.id, cursor).limit(size + 1)
     rows = list((await db.execute(stmt)).scalars().all())
     has_more = len(rows) > size
     rows = rows[:size]
@@ -604,7 +594,7 @@ async def retry_job(
     幂等约束（4 元组）不变，因此复用同一行，不产生重复任务或重复产出。
     投递交由扫描器完成（本函数处于请求事务中，提交前投递会读到未提交行）。
     """
-    job = await db.get(Job, job_id)
+    job = await db.scalar(select(Job).where(Job.id == job_id).with_for_update().execution_options(populate_existing=True))
     if job is None:
         raise NotFound("任务不存在")
     if job.status not in (JobStatus.FAILED.value, JobStatus.CANCELLED.value):
@@ -634,4 +624,5 @@ async def retry_job(
         after={"status": JobStatus.QUEUED.value, "job_type": job.job_type},
         request_id=request_id,
     )
+    await db.refresh(job)
     return JobOut.model_validate(job)

@@ -17,6 +17,7 @@
 from __future__ import annotations
 
 import re
+import hashlib
 import tempfile
 import uuid
 from datetime import datetime, timedelta, timezone
@@ -56,7 +57,7 @@ from app.core.errors import Conflict, Forbidden, InvalidInput, NotFound
 from app.core.events import emit_event
 from app.core.pagination import decode_cursor, encode_cursor, normalize_page_size
 from app.core.permissions import RESOURCE_PUBLISH, RESOURCE_REVIEW, has_permission
-from app.core.storage import build_storage_key, storage
+from app.core.storage import ObjectSizeExceeded, build_storage_key, storage
 from app.modules.content.derivatives import (
     PROCESSOR_VERSION,
     DerivativeError,
@@ -1183,15 +1184,18 @@ async def process_file_scan(db: AsyncSession, *, file_id: uuid.UUID) -> ScanStat
     """检查任务：自行计算哈希、识别真实格式、执行扫描（§16 步骤 5）。"""
     from app.modules.jobs.service import enqueue
 
-    file = await get_file(db, file_id)
+    file = await db.scalar(select(ResourceFile).where(ResourceFile.id == file_id).with_for_update().execution_options(populate_existing=True))
+    if file is None:
+        raise NotFound("文件不存在")
     if file.scan_status == ScanStatus.PASSED.value:
         return ScanStatus.PASSED
 
     file.scan_status = ScanStatus.RUNNING.value
     await db.flush()
 
+    verified_key = build_storage_key("originals", file.original_name)
     outcome: ScanOutcome = await scan_quarantined_object(
-        file.storage_key, original_name=file.original_name
+        file.storage_key, original_name=file.original_name, verified_storage_key=verified_key
     )
     if outcome.sha256:
         file.sha256 = outcome.sha256
@@ -1206,7 +1210,7 @@ async def process_file_scan(db: AsyncSession, *, file_id: uuid.UUID) -> ScanStat
 
     if outcome.status == ScanStatus.PASSED:
         # 扫描通过后才允许从隔离区转入私有区（§16）。
-        await storage.promote(file.storage_key, target_bucket=settings.S3_BUCKET_PRIVATE)
+        file.storage_key = verified_key
         if file.upload_session_id:
             session = await db.get(UploadSession, file.upload_session_id)
             if session is not None:
@@ -1231,21 +1235,26 @@ async def process_file_scan(db: AsyncSession, *, file_id: uuid.UUID) -> ScanStat
 
 async def process_file_derive(db: AsyncSession, *, file_id: uuid.UUID) -> DerivativeStatus:
     """预览派生任务；失败不改变原件审核事实，不假显示“预览就绪”（§13.1）。"""
-    file = await get_file(db, file_id)
+    file = await db.scalar(select(ResourceFile).where(ResourceFile.id == file_id).with_for_update().execution_options(populate_existing=True))
+    if file is None:
+        raise NotFound("文件不存在")
     if file.scan_status != ScanStatus.PASSED.value:
         raise Conflict("文件尚未通过安全检查，不能生成预览", code="FILE_NOT_READY")
 
-    await db.execute(delete(FileDerivative).where(FileDerivative.source_file_id == file.id))
     kind = primary_kind(file.detected_mime)
+
+    ready = await db.scalar(select(FileDerivative.id).where(
+        FileDerivative.source_file_id == file.id, FileDerivative.kind == kind.value,
+        FileDerivative.processor_version == PROCESSOR_VERSION, FileDerivative.status == DerivativeStatus.READY.value,
+    ).limit(1))
+    if ready is not None:
+        return DerivativeStatus.READY
 
     with tempfile.TemporaryDirectory(prefix="njupt-derive-") as tmp:
         workdir = Path(tmp)
         source = workdir / "source"
-        with source.open("wb") as handle:
-            await storage.download_to_file(
-                file.storage_key, handle, bucket=settings.S3_BUCKET_PRIVATE
-            )
         try:
+            await _download_verified_source(file, source)
             artifacts = await build_derivatives(
                 source, detected_mime=file.detected_mime or "", workdir=workdir
             )
@@ -1262,6 +1271,11 @@ async def process_file_derive(db: AsyncSession, *, file_id: uuid.UUID) -> Deriva
             await db.flush()
             return DerivativeStatus.FAILED
 
+        # 成功得到完整产物后才替换旧的普通派生记录，失败不清空已有预览。
+        await db.execute(delete(FileDerivative).where(
+            FileDerivative.source_file_id == file.id,
+            FileDerivative.kind.in_([DerivativeKind.PREVIEW_PDF.value, DerivativeKind.THUMBNAIL.value]),
+        ))
         for artifact in artifacts:
             derivative_key = build_storage_key("derivatives", artifact.path.name)
             with artifact.path.open("rb") as handle:
@@ -1324,7 +1338,8 @@ async def ensure_watermarked_preview(
     if user is None:
         # 匿名用户无法绑定用户水印，回退到既有受限预览。
         return None
-    if source_file.scan_status != ScanStatus.PASSED.value:
+    source_file = await db.scalar(select(ResourceFile).where(ResourceFile.id == source_file.id).with_for_update().execution_options(populate_existing=True))
+    if source_file is None or source_file.scan_status != ScanStatus.PASSED.value:
         return None
     mime = source_file.detected_mime
     if mime not in (PDF_MIME, PNG_MIME, JPEG_MIME):
@@ -1339,6 +1354,7 @@ async def ensure_watermarked_preview(
         .where(
             FileDerivative.source_file_id == source_file.id,
             FileDerivative.kind == DerivativeKind.WATERMARKED_PREVIEW.value,
+            FileDerivative.processor_version == PROCESSOR_VERSION,
             FileDerivative.status == DerivativeStatus.READY.value,
             FileDerivative.storage_key.like(f"%-{owner_key}.webp"),
         )
@@ -1353,10 +1369,10 @@ async def ensure_watermarked_preview(
     with tempfile.TemporaryDirectory(prefix="njupt-wm-preview-") as tmp:
         workdir = Path(tmp)
         source = workdir / "source"
-        with source.open("wb") as handle:
-            await storage.download_to_file(
-                source_file.storage_key, handle, bucket=settings.S3_BUCKET_PRIVATE
-            )
+        try:
+            await _download_verified_source(source_file, source)
+        except DerivativeError:
+            return None
         artifact = await build_watermarked_preview(
             source, detected_mime=mime, workdir=workdir, watermark_text=watermark_text
         )
@@ -1382,3 +1398,19 @@ async def ensure_watermarked_preview(
     db.add(row)
     await db.flush()
     return row
+
+
+async def _download_verified_source(file: ResourceFile, destination: Path) -> None:
+    if not file.sha256:
+        raise DerivativeError("缺少安全检查摘要，不能生成新的预览")
+    try:
+        with destination.open("wb") as handle:
+            written = await storage.download_to_file(file.storage_key, handle, bucket=settings.S3_BUCKET_PRIVATE)
+    except ObjectSizeExceeded as exc:
+        raise DerivativeError("文件超过大小上限") from exc
+    digest = hashlib.sha256()
+    with destination.open("rb") as handle:
+        for chunk in iter(lambda: handle.read(1024 * 1024), b""):
+            digest.update(chunk)
+    if written != file.size or digest.hexdigest() != file.sha256:
+        raise DerivativeError("文件字节与安全检查记录不一致")

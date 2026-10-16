@@ -90,7 +90,7 @@ async def workbench_summary(db: AsyncSession) -> WorkbenchOut:
             key="failed_tasks",
             label="失败的异步事件/任务",
             count=failed_events + failed_jobs,
-            href="/admin/events",
+            href="/admin/workbench#failed-queues",
         ),
     ]
     return WorkbenchOut(

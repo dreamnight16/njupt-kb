@@ -12,7 +12,7 @@ import uuid
 from datetime import datetime, timedelta, timezone
 from typing import TYPE_CHECKING
 
-from sqlalchemy import Uuid, and_, bindparam, func, or_, select, text
+from sqlalchemy import Uuid, bindparam, func, select, text
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -28,10 +28,10 @@ from app.core.enums import (
     ScanStatus,
     ScopeType,
 )
-from app.core.errors import Conflict, Forbidden, NotFound, RateLimited
+from app.core.errors import Conflict, Forbidden, InvalidInput, NotFound, RateLimited
 from app.core.pagination import (
     CursorPage,
-    decode_cursor,
+    seek_descending,
     encode_cursor,
     normalize_page_size,
 )
@@ -197,7 +197,7 @@ async def issue_preview_grant(
         db, user=user, resource_id=resource_id, version_id=version_id, capability=Capability.PREVIEW
     )
 
-    from app.modules.content.service import ensure_watermarked_preview, get_version
+    from app.modules.content.service import ensure_watermarked_preview, get_resource, get_version
 
     version = await get_version(db, version_id)
     if version.preview_disabled:
@@ -225,6 +225,15 @@ async def issue_preview_grant(
         derivative_id, storage_key, kind = found
         preview_type = _preview_type_of(kind)
 
+    # 首次渲染可能耗时较长；交付前重新读取授权事实，不能沿用渲染前的权限快照。
+    await db.refresh(await get_resource(db, resource_id))
+    await db.refresh(version)
+    await db.refresh(resource_file)
+    if user is not None:
+        await db.refresh(user)
+    await authorize(db, user=user, resource_id=resource_id, version_id=version_id, capability=Capability.PREVIEW)
+    if version.preview_disabled:
+        raise NotFound("作者已关闭该版本的预览", code="PREVIEW_DISABLED")
     signed = await storage.presign_download(storage_key, bucket=settings.S3_BUCKET_PRIVATE)
     grant = PreviewGrant(
         user_id=user.id if user is not None else None,
@@ -452,19 +461,10 @@ async def list_entitlements(
     cursor: str | None,
 ) -> CursorPage[EntitlementOut]:
     size = normalize_page_size(limit)
-    stmt = select(Entitlement).order_by(Entitlement.created_at.desc(), Entitlement.id.desc())
+    stmt = select(Entitlement)
     if user_id is not None:
         stmt = stmt.where(Entitlement.user_id == user_id)
-    if cursor:
-        data = decode_cursor(cursor)
-        ts = datetime.fromisoformat(data["ts"])
-        cid = uuid.UUID(data["id"])
-        stmt = stmt.where(
-            or_(
-                Entitlement.created_at < ts,
-                and_(Entitlement.created_at == ts, Entitlement.id < cid),
-            )
-        )
+    stmt = seek_descending(db, stmt, Entitlement.created_at, Entitlement.id, cursor)
     rows = list((await db.execute(stmt.limit(size + 1))).scalars().all())
     has_more = len(rows) > size
     items = rows[:size]
@@ -489,6 +489,28 @@ async def create_entitlement(
     from app.modules.identity.service import get_user
 
     target = await get_user(db, payload.user_id)  # 找不到抛 NotFound
+
+    if target.status in ("banned", "deleted"):
+        raise InvalidInput("不能向已封禁或注销的账号授予权益")
+    if payload.expires_at is not None:
+        now = _now()
+        start = max(_aware(payload.starts_at), now) if payload.starts_at is not None else now
+        if _aware(payload.expires_at) <= start:
+            raise InvalidInput("到期时间必须晚于生效时间和当前时间")
+    from app.modules.content.service import get_resource, get_version
+    from app.modules.catalog.service import get_course
+
+    # 既有权益支持资料、版本或课程；不存在的 UUID 不生成占位权益。
+    found = False
+    for resolve in (get_resource, get_version, get_course):
+        try:
+            await resolve(db, payload.scope_id)
+            found = True
+            break
+        except NotFound:
+            continue
+    if not found:
+        raise NotFound("授权对象不存在")
 
     entitlement = Entitlement(
         user_id=target.id,
@@ -515,7 +537,7 @@ async def create_entitlement(
             "scope_id": str(entitlement.scope_id),
             "capability": entitlement.capability,
             "source_type": entitlement.source_type,
-            "expires_at": entitlement.expires_at,
+            "expires_at": entitlement.expires_at.isoformat() if entitlement.expires_at else None,
         },
         request_id=request_id,
     )
@@ -550,7 +572,7 @@ async def revoke_entitlement(
         object_id=entitlement.id,
         actor_id=actor.id,
         before=before,
-        after={"revoked_at": entitlement.revoked_at, "reason": reason},
+        after={"revoked_at": entitlement.revoked_at.isoformat(), "reason": reason},
         reason=reason,
         request_id=request_id,
     )
@@ -632,7 +654,7 @@ async def initialize_policy(db: AsyncSession, resource_id: uuid.UUID) -> uuid.UU
 # 内部辅助
 # --------------------------------------------------------------------------
 async def _load_policy(db: AsyncSession, resource_id: uuid.UUID) -> AccessPolicy | None:
-    stmt = select(AccessPolicy).where(AccessPolicy.resource_id == resource_id)
+    stmt = select(AccessPolicy).where(AccessPolicy.resource_id == resource_id).execution_options(populate_existing=True)
     return (await db.execute(stmt)).scalar_one_or_none()
 
 

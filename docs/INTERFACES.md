@@ -1,5 +1,19 @@
 # 跨模块接口声明
 
+## beta12 增补
+
+- `identity.service.set_account_status(db, *, user_id, status, reason, actor_id, request_id)`：人工暂停/恢复账号的唯一写入口。行锁读取目标；仅有效管理员可操作，不能暂停/恢复自己或其他管理员；`reason` 必填；状态必须按 `active→suspended→active` 流转，非法流向、状态已变化或目标已注销返回 409 `ACCOUNT_STATE_CHANGED`。会话撤销与同事务审计由调用方 `moderation.set_account_restriction` 负责，本函数不重复实现。
+- `POST /admin/users/{user_id}/suspend` 与 `/admin/users/{user_id}/reinstate`（204）：`reason` 必填；复用 `set_account_restriction`，暂停时撤销全部会话并写审计；恢复已注销账号返回 409。
+- `GET /admin/users`（权限 `user.suspend`）：`keyword/status/role` 过滤 + 游标分页；只返回 ID、邮箱、昵称、角色、状态、验证与注册时间，不含口令等敏感字段；`keyword` 中的 `%`/`_` 按字面转义，不作为通配符。
+- `ops.personal.overview/downloads/feed` 及 `GET /me/overview`、`/me/downloads`、`/me/feed`：从既有业务事实聚合，不新增跟踪表。总览只统计本人事实；下载历史按授予时间降序游标分页，资料转私有、下架或发布新版本后，该行 `available=false` 并遮蔽资料 ID/标题/文件名/版本号，不泄露已失去访问权的内容；关注动态合并课程与创作者关注、按当前已发布版本去重，非发布态不出现。游标无效返回 400。
+- `access.create_entitlement`：不得向 `banned`/`deleted` 账号授予；`expires_at` 必须晚于生效时间与当前时间；`scope_id` 必须已存在（资料、版本或课程之一），拒绝指向不存在对象的占位权益；`expires_at`/`revoked_at` 以 ISO 字符串写入审计，不存裸对象。
+- `jobs.retry_job`：行锁读取并刷新后返回；仅 `failed`/`cancelled` 可重新入队，重置 attempts；已 `queued`/`running` 返回 409。`PROCESSOR_VERSIONS` 的 `file.scan`/`file.derive` 升至 `scan/2`、`derive/2`，与 `derivatives.PROCESSOR_VERSION` 一致。
+- `core.pagination.seek_descending(db, stmt, timestamp, identity, cursor)`：模块共用的（时间戳, id）降序游标翻页；SQLite 用 `strftime` 对齐时间小数位，PostgreSQL 保持原表达式；jobs、moderation、access 与 ops 列表统一走它，不再各自实现元组比较。
+- `content.scanning.scan_quarantined_object(..., verified_storage_key)`：扫描通过后把**本次实际扫描的本地字节**写入私有区目标键，不再复制可能被上传凭证覆盖的隔离对象；下载超限返回 `size_exceeded`，格式解析失败以 `malformed:` 前缀拒绝，扫描或存储失败不会留下私有区快照。OOXML 拒绝绝对路径、`..`、盘符与符号链接条目，限制压缩条目数与解包总量（`MAX_ARCHIVE_ENTRIES`/`MAX_ARCHIVE_UNPACKED_BYTES`）；宏文档大小写不敏感排除；PDF 页数与图片像素受 `MAX_DOCUMENT_PAGES`/`MAX_IMAGE_PIXELS` 约束。
+- `content.service._download_verified_source`（内部）：生成预览前重新下载并校验 `size` 与 `sha256`，与扫描记录不一致即 `DerivativeError`，不渲染、不清空既有预览；普通派生成功后才替换旧记录，失败不清空；水印对象按处理器版本复用。
+- `access.issue_preview_grant`：首次渲染完成后重新读取资源、版本、文件与用户事实并重新授权；渲染期间下架、关闭预览或权限变化都不会签发预览链接（`PREVIEW_DISABLED` 404）。
+- `core.storage.ObjectSizeExceeded`：对象下载超过 `MAX_UPLOAD_SIZE_BYTES` 即停止读取并关闭响应体，不写满临时磁盘。
+
 ## beta11 增补
 
 - `content.service.ensure_watermarked_preview(db, *, source_file, user)`：仅在 access 已授权后调用，为已扫描 PDF/PNG/JPEG 生成或复用当前用户第一页 WebP；完整 HMAC 区分用户对象，显示水印只用短码和生成日期。关闭、匿名、不支持格式或转换失败返回 `None`；存储故障由 access 回退已有受限派生文件，不改变原件与下载权益。

@@ -136,6 +136,7 @@ export function AppHeader() {
                         </p>
                       )}
                     </div>
+                    <MenuLink href="/me" icon={UserCog} label="个人总览" />
                     <MenuLink href="/me/resources" icon={BookOpen} label="我的资料" />
                     <MenuLink href="/me/contributions" icon={Award} label="我的贡献" />
                     <MenuLink href="/me/profile" icon={UserCog} label="个人资料" />

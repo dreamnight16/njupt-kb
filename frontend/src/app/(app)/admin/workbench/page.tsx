@@ -82,6 +82,13 @@ function Workbench() {
         </ul>
       )}
 
+      <section id="failed-queues" className="space-y-3">
+        <h3 className="dn-display text-xl">异步处理</h3>
+        <div className="flex flex-wrap gap-3">
+          <Link href="/admin/jobs" className="border border-divider px-4 py-3 text-sm text-brand">扫描、转换与后台任务 →</Link>
+          <Link href="/admin/events" className="border border-divider px-4 py-3 text-sm text-brand">失败通知事件 →</Link>
+        </div>
+      </section>
       <p className="text-xs text-text-secondary">
         合计待办 {data.total} 项 · 生成于 {formatDateTime(data.generated_at)}
       </p>

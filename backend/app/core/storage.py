@@ -21,6 +21,10 @@ from app.config import settings
 from app.core.errors import DependencyUnavailable, NotFound
 
 
+class ObjectSizeExceeded(Exception):
+    """对象超过既有上传大小上限，停止读取而非写满临时磁盘。"""
+
+
 @dataclass(frozen=True)
 class PresignedUpload:
     url: str
@@ -137,12 +141,19 @@ class ObjectStorage:
                     self._client.get_object, Bucket=bucket, Key=storage_key
                 )
                 body = obj["Body"]
-                while True:
-                    chunk = await asyncio.to_thread(body.read, 1024 * 1024)
-                    if not chunk:
-                        break
-                    target.write(chunk)
-                    written += len(chunk)
+                try:
+                    if int(obj.get("ContentLength", 0)) > settings.MAX_UPLOAD_SIZE_BYTES:
+                        raise ObjectSizeExceeded()
+                    while True:
+                        chunk = await asyncio.to_thread(body.read, 1024 * 1024)
+                        if not chunk:
+                            break
+                        if written + len(chunk) > settings.MAX_UPLOAD_SIZE_BYTES:
+                            raise ObjectSizeExceeded()
+                        target.write(chunk)
+                        written += len(chunk)
+                finally:
+                    body.close()
             except ClientError as exc:
                 code = exc.response.get("Error", {}).get("Code", "")
                 if code in {"404", "NoSuchKey", "NotFound"}:

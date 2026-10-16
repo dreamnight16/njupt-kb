@@ -28,6 +28,7 @@ nginx/ssl/
 *.db
 *.sqlite3
 uploads/
+backend/dev.db.bak
 
 # 构建产物
 dist/
