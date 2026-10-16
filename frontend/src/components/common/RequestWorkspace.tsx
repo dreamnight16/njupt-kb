@@ -15,6 +15,7 @@ import { api, describeError } from "@/lib/api/client";
 import {
   getRequest,
   changeRequestStatus,
+  reopenRequest,
   listRequestResponses,
   submitRequestResponse,
 } from "@/lib/api/interaction";
@@ -33,10 +34,12 @@ export function RequestWorkspace({ requestId }: { requestId: string }) {
   const [selected, setSelected] = useState("");
   const [reason, setReason] = useState("");
   const [action, setAction] = useState<{
-    status: "open" | "closed" | "fulfilled";
+    status: "closed" | "fulfilled";
     revision: number;
     resourceId?: string;
   } | null>(null);
+  const [reopenAction, setReopenAction] = useState<{ revision: number } | null>(null);
+  const [reopenReason, setReopenReason] = useState("");
   const query = useQuery({
     queryKey: ["request-detail", requestId],
     queryFn: () => getRequest(requestId),
@@ -107,9 +110,41 @@ export function RequestWorkspace({ requestId }: { requestId: string }) {
       refresh();
     },
   });
+  const reopenMutation = useMutation({
+    mutationFn: () => {
+      if (!reopenAction) throw new Error("请先打开复核重开");
+      return reopenRequest(requestId, {
+        reason: reopenReason.trim(),
+        expected_revision: reopenAction.revision,
+      });
+    },
+    onSuccess: (updated) => {
+      client.setQueryData(["request-detail", requestId], updated);
+      setReopenAction(null);
+      setReopenReason("");
+      refresh();
+      toast.success("需求已重新打开，可继续寻找资料");
+    },
+    onError: (error) => {
+      const e = describeError(error);
+      toast.error(e.message);
+      if (e.code === "STALE_REVISION") {
+        // 版本冲突：关闭弹窗并刷新，让用户基于最新修订重试。
+        setReopenAction(null);
+        setReopenReason("");
+      }
+      refresh();
+    },
+  });
   const close = useCallback(() => {
     if (!mutation.isPending) setAction(null);
   }, [mutation.isPending]);
+  const closeReopen = useCallback(() => {
+    if (!reopenMutation.isPending) {
+      setReopenAction(null);
+      setReopenReason("");
+    }
+  }, [reopenMutation.isPending]);
   const row = query.data;
   if (query.isPending) return <p role="status">正在加载需求…</p>;
   if (!row || query.error)
@@ -124,7 +159,7 @@ export function RequestWorkspace({ requestId }: { requestId: string }) {
     );
   const active = user?.status === "active";
   const manager = active && (user.id === row.requester_id || isAdmin(user));
-  function open(status: "open" | "closed" | "fulfilled", resourceId?: string) {
+  function open(status: "closed" | "fulfilled", resourceId?: string) {
     setAction({ status, resourceId, revision: row!.revision });
     setReason("");
   }
@@ -147,7 +182,7 @@ export function RequestWorkspace({ requestId }: { requestId: string }) {
         </p>
       </header>
       {row.status === "fulfilled" &&
-        (row.resolution_available && row.resolved_resource_id ? (
+        (row.resolved_resource_accessible && row.resolved_resource_id ? (
           <Notice title="需求已确认解决">
             <Link
               className="text-brand underline"
@@ -169,10 +204,15 @@ export function RequestWorkspace({ requestId }: { requestId: string }) {
               关闭需求
             </Button>
           )}
-          {(row.status === "fulfilled" ||
-            (row.status === "closed" && isAdmin(user))) && (
-            <Button variant="secondary" onClick={() => open("open")}>
-              重新打开
+          {(row.status === "fulfilled" || row.status === "closed") && (
+            <Button
+              variant="secondary"
+              onClick={() => {
+                setReopenReason("");
+                setReopenAction({ revision: row.revision });
+              }}
+            >
+              复核重开
             </Button>
           )}
         </div>
@@ -316,13 +356,7 @@ export function RequestWorkspace({ requestId }: { requestId: string }) {
       <Modal
         isOpen={!!action}
         onClose={close}
-        title={
-          action?.status === "fulfilled"
-            ? "确认解决"
-            : action?.status === "closed"
-              ? "关闭需求"
-              : "重新打开需求"
-        }
+        title={action?.status === "fulfilled" ? "确认解决" : "关闭需求"}
       >
         <div className="space-y-4 p-6">
           <label className="block text-sm">
@@ -347,6 +381,43 @@ export function RequestWorkspace({ requestId }: { requestId: string }) {
               variant="secondary"
               onClick={close}
               disabled={mutation.isPending}
+            >
+              取消
+            </Button>
+          </div>
+        </div>
+      </Modal>
+      <Modal
+        isOpen={!!reopenAction}
+        onClose={closeReopen}
+        title="复核重开需求"
+      >
+        <div className="space-y-4 p-6">
+          <p className="text-sm text-text-secondary">
+            需求将回到「寻找中」并清空原解决资料，可重新收集候选资料。请填写复核理由。
+          </p>
+          <label className="block text-sm">
+            复核理由（必填）
+            <textarea
+              rows={3}
+              maxLength={500}
+              value={reopenReason}
+              onChange={(e) => setReopenReason(e.target.value)}
+              className="mt-2 block w-full border border-control-border bg-surface p-2"
+            />
+          </label>
+          <div className="flex gap-3">
+            <Button
+              onClick={() => reopenMutation.mutate()}
+              isLoading={reopenMutation.isPending}
+              disabled={!reopenReason.trim()}
+            >
+              确认重开
+            </Button>
+            <Button
+              variant="secondary"
+              onClick={closeReopen}
+              disabled={reopenMutation.isPending}
             >
               取消
             </Button>

@@ -189,6 +189,9 @@ class RequestItem(BaseModel):
     handled_at: datetime | None = None
     resolution_available: bool = False
     resolved_resource_title: str | None = None
+    # 解决资源对当前查看者是否可访问（资源不存在/未发布/无可见性/已撤销发布均为 False）。
+    # 不可访问时不返回标题等可识别信息，前端据此展示「原解决资料当前不可访问」。
+    resolved_resource_accessible: bool = False
 
 
 class RequestStatusUpdate(_InputModel):
@@ -196,6 +199,21 @@ class RequestStatusUpdate(_InputModel):
     expected_revision: int = Field(ge=1)
     resource_id: uuid.UUID | None = None
     reason: str | None = Field(default=None, max_length=500)
+
+
+class RequestReopen(_InputModel):
+    """复核重开：解决资源失效后由发起者或管理员显式重开，不静默改状态。"""
+
+    expected_revision: int = Field(ge=1)
+    reason: str = Field(min_length=1, max_length=500)
+
+    @field_validator("reason")
+    @classmethod
+    def _strip_reason(cls, value: str) -> str:
+        cleaned = value.strip()
+        if not cleaned:
+            raise ValueError("请填写复核重开的理由")
+        return cleaned
 
 
 class RequestResponseCreate(_InputModel):

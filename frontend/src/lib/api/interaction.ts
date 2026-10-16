@@ -99,6 +99,8 @@ export interface RequestItem {
   handled_at: string | null;
   resolution_available: boolean;
   resolved_resource_title: string | null;
+  /** 解决资源对当前查看者是否可访问；false 时标题等可识别信息不返回（原解决资料当前不可访问）。 */
+  resolved_resource_accessible: boolean;
 }
 
 export interface RequestResponseItem {
@@ -112,6 +114,10 @@ export async function getRequest(id: string): Promise<RequestItem> {
 }
 export async function changeRequestStatus(id: string, payload: { status: 'open' | 'fulfilled' | 'closed'; expected_revision: number; resource_id?: string; reason?: string }): Promise<RequestItem> {
   return (await api.post(`/requests/${id}/status`, payload)).data;
+}
+/** 复核重开：解决资源失效后由发起者或管理员带理由重开，回到 open 并清空解决资源。 */
+export async function reopenRequest(id: string, payload: { reason: string; expected_revision: number }): Promise<RequestItem> {
+  return (await api.post(`/requests/${id}/reopen`, payload)).data;
 }
 export async function listRequestResponses(id: string, cursor?: string | null): Promise<CursorPage<RequestResponseItem>> {
   return (await api.get(`/requests/${id}/responses`, { params: { cursor: cursor || undefined } })).data;

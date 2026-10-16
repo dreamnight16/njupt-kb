@@ -930,11 +930,21 @@ async def request_followers(db, request_id):
 
 
 async def _request_item(
-    db: AsyncSession, request: ResourceRequest, follower_count: int | None = None, resolution=None
+    db: AsyncSession,
+    request: ResourceRequest,
+    follower_count: int | None = None,
+    resolution=None,
+    viewer=None,
 ) -> RequestItem:
     count = follower_count if follower_count is not None else await _follower_count(db, request.id)
     from app.modules.interaction.request_management import resolution_summary
-    resource_id, resource_title = resolution if resolution is not None else await resolution_summary(db, request.resolved_resource_id, request.course_id)
+    resource_id, resource_title = (
+        resolution
+        if resolution is not None
+        else await resolution_summary(
+            db, request.resolved_resource_id, request.course_id, user=viewer
+        )
+    )
     return RequestItem(
         id=request.id,
         course_id=request.course_id,
@@ -946,6 +956,7 @@ async def _request_item(
         created_at=request.created_at,
         requester_id=request.requester_id, revision=request.revision, handled_at=request.handled_at,
         resolution_available=resource_id is not None, resolved_resource_title=resource_title,
+        resolved_resource_accessible=resource_id is not None,
     )
 
 
@@ -1005,6 +1016,7 @@ async def list_requests(
     status: str | None,
     cursor: str | None,
     limit: int | None,
+    viewer=None,
 ) -> CursorPage[RequestItem]:
     page_size = normalize_page_size(limit)
     follower_count = (
@@ -1037,9 +1049,11 @@ async def list_requests(
     rows = rows[:page_size]
 
     from app.modules.interaction.request_management import public_summaries
-    summaries = await public_summaries(db, [(r.resolved_resource_id,r.course_id) for r,_ in rows])
+    summaries = await public_summaries(
+        db, [(r.resolved_resource_id, r.course_id) for r, _ in rows], user=viewer
+    )
     items = [
-        await _request_item(db, request, follower_count=int(count or 0), resolution=summaries.get((request.resolved_resource_id,request.course_id),(None,None)))
+        await _request_item(db, request, follower_count=int(count or 0), resolution=summaries.get((request.resolved_resource_id, request.course_id), (None, None)))
         for request, count in rows
     ]
     next_cursor = (
@@ -1056,6 +1070,7 @@ async def list_my_requests(
     user_id: uuid.UUID,
     cursor: str | None,
     limit: int | None,
+    viewer=None,
 ) -> CursorPage[RequestItem]:
     page_size = normalize_page_size(limit)
     follower_count = (
@@ -1082,9 +1097,11 @@ async def list_my_requests(
     has_more = len(rows) > page_size
     rows = rows[:page_size]
     from app.modules.interaction.request_management import public_summaries
-    summaries = await public_summaries(db, [(r.resolved_resource_id,r.course_id) for r,_ in rows])
+    summaries = await public_summaries(
+        db, [(r.resolved_resource_id, r.course_id) for r, _ in rows], user=viewer
+    )
     items = [
-        await _request_item(db, request, follower_count=int(count or 0), resolution=summaries.get((request.resolved_resource_id,request.course_id),(None,None)))
+        await _request_item(db, request, follower_count=int(count or 0), resolution=summaries.get((request.resolved_resource_id, request.course_id), (None, None)))
         for request, count in rows
     ]
     next_cursor = (

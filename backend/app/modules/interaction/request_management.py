@@ -19,7 +19,12 @@ from app.modules.interaction.models import ResourceRequest, ResourceRequestRespo
 from app.modules.interaction.schemas import RequestItem, RequestResponseItem
 
 
-async def public_summaries(db, pairs):
+async def public_summaries(db, pairs, user=None):
+    """批量解析解决资源摘要；可见性按查看者判定（user=None 即匿名）。
+
+    不可访问（不存在/未发布/查看者无可见性/已撤销发布）的条目不返回，
+    调用方据此只暴露「原解决资料当前不可访问」，不泄露受限标题。
+    """
     from sqlalchemy import Uuid, String, column, table
     from app.modules.access.visibility import visible_resource_ids
 
@@ -45,7 +50,7 @@ async def public_summaries(db, pairs):
         .select_from(r.join(v, v.c.id == r.c.published_version_id))
         .where(
             r.c.id.in_([rid for rid, _ in valid]),
-            r.c.id.in_(visible_resource_ids(None)),
+            r.c.id.in_(visible_resource_ids(user)),
             r.c.publication_status == "published",
             v.c.resource_id == r.c.id,
             v.c.review_status == "approved",
@@ -73,8 +78,8 @@ async def public_resource(db, resource_id, course_id):
     return result
 
 
-async def resolution_summary(db, resource_id, course_id):
-    return (await public_summaries(db, [(resource_id, course_id)])).get(
+async def resolution_summary(db, resource_id, course_id, user=None):
+    return (await public_summaries(db, [(resource_id, course_id)], user=user)).get(
         (resource_id, course_id), (None, None)
     )
 
@@ -89,10 +94,10 @@ async def get_request(db, request_id, *, lock=False):
     return row
 
 
-async def request_detail(db, request_id) -> RequestItem:
+async def request_detail(db, request_id, viewer=None) -> RequestItem:
     from app.modules.interaction.service import _request_item
 
-    return await _request_item(db, await get_request(db, request_id))
+    return await _request_item(db, await get_request(db, request_id), viewer=viewer)
 
 
 def active(user):
@@ -118,7 +123,7 @@ async def change_status(
     if payload.status != "fulfilled" and resource_id is not None:
         raise InvalidInput("该操作不能附带解决资料")
     if row.status == payload.status and row.resolved_resource_id == resource_id:
-        return await _request_item(db, row)
+        return await _request_item(db, row, viewer=user)
     if row.revision != payload.expected_revision:
         raise Conflict("需求已变化，请刷新后重试", code="STALE_REVISION")
     if (row.status, payload.status) not in {
@@ -172,7 +177,69 @@ async def change_status(
         payload={"status": row.status, "course_id": str(row.course_id)},
         dedupe_key=f"request.status:{row.id}:{row.revision}",
     )
-    return await _request_item(db, row)
+    return await _request_item(db, row, viewer=user)
+
+
+async def reopen(db, *, user, request_id, payload, request_trace_id) -> RequestItem:
+    """复核重开：解决资源失效（下架/权限收紧）后由发起者或管理员显式重开。
+
+    与 change_status 的区别：closed 也允许发起者重开；理由必填；
+    只回到 open 并清空解决资源，不附带新的解决资料。
+    """
+    from app.modules.interaction.service import _request_item
+
+    active(user)
+    row = await get_request(db, request_id, lock=True)
+    manager = has_permission(user, REQUEST_HANDLE)
+    if not manager and row.requester_id != user.id:
+        raise Forbidden("仅发起者或管理员可以复核重开需求")
+    if row.status == "open":
+        raise Conflict("需求已是打开状态")
+    if row.status not in ("fulfilled", "closed"):
+        raise Conflict("不支持此状态流转")
+    if row.revision != payload.expected_revision:
+        raise Conflict("需求已变化，请刷新后重试", code="STALE_REVISION")
+    reason = payload.reason.strip()
+    before = {
+        "status": row.status,
+        "revision": row.revision,
+        "resolved_resource_id": str(row.resolved_resource_id)
+        if row.resolved_resource_id
+        else None,
+    }
+    row.status = "open"
+    row.resolved_resource_id = None
+    row.handled_by = user.id
+    row.handled_at = datetime.now(timezone.utc)
+    row.revision += 1
+    await record_audit(
+        db,
+        action="request.reopened",
+        object_type="resource_request",
+        object_id=row.id,
+        object_version=row.revision,
+        actor_id=user.id,
+        before=before,
+        after={
+            "status": row.status,
+            "revision": row.revision,
+            "resolved_resource_id": None,
+        },
+        reason=reason,
+        request_id=request_trace_id,
+    )
+    await emit_event(
+        db,
+        event_type=DomainEventType.REQUEST_UPDATED,
+        subject_type="resource_request",
+        subject_id=row.id,
+        subject_version=row.revision,
+        # payload 只放需求 ID 与修订号：不复制解决资源标题/正文，也不新增事件类型
+        # （domain_events.event_type 有共享 CHECK 约束）。
+        payload={"request_id": str(row.id), "revision": row.revision},
+        dedupe_key=f"request.reopen:{row.id}:{row.revision}",
+    )
+    return await _request_item(db, row, viewer=user)
 
 
 async def response_item(db, row, course_id, summary=None):

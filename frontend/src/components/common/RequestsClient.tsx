@@ -162,6 +162,11 @@ export function RequestsClient({ initialCourse, initialOpen }: {
                   >
                     {statusLabels[item.status] ?? item.status}
                   </span>
+                  {item.status === 'fulfilled' && !item.resolved_resource_accessible && (
+                    <span className="px-2 py-0.5 text-xs font-semibold bg-amber text-on-color">
+                      原解决资料当前不可访问
+                    </span>
+                  )}
                   <span className="text-xs text-text-secondary">
                     {item.follower_count} 人关注
                   </span>

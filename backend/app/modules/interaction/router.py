@@ -33,6 +33,7 @@ from app.modules.interaction.schemas import (
     RequestCreate,
     RequestCreateResult,
     RequestItem,
+    RequestReopen,
     RequestStatusUpdate,
     RequestResponseCreate,
     RequestResponseItem,
@@ -372,6 +373,7 @@ async def list_requests(
     cursor: str | None = None,
     limit: int | None = Query(default=None, ge=1, le=100),
     db: AsyncSession = Depends(get_db),
+    user=Depends(get_optional_user),
 ) -> CursorPage[RequestItem]:
     return await service.list_requests(
         db,
@@ -379,6 +381,7 @@ async def list_requests(
         status=request_status,
         cursor=cursor,
         limit=limit,
+        viewer=user,
     )
 
 
@@ -398,7 +401,9 @@ async def list_my_requests(
     user=Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ) -> CursorPage[RequestItem]:
-    return await service.list_my_requests(db, user_id=user.id, cursor=cursor, limit=limit)
+    return await service.list_my_requests(
+        db, user_id=user.id, cursor=cursor, limit=limit, viewer=user
+    )
 
 
 # 贡献者公开主页（§24.1）由 creator 模块的 GET /creators/{user_id} 提供，
@@ -406,9 +411,10 @@ async def list_my_requests(
 
 
 @router.get("/requests/{request_id}", response_model=RequestItem)
-async def request_detail(request_id: uuid.UUID, db: AsyncSession = Depends(get_db)):
+async def request_detail(request_id: uuid.UUID, user=Depends(get_optional_user),
+    db: AsyncSession = Depends(get_db)):
     from app.modules.interaction.request_management import request_detail
-    return await request_detail(db, request_id)
+    return await request_detail(db, request_id, viewer=user)
 
 
 @router.post("/requests/{request_id}/status", response_model=RequestItem)
@@ -416,6 +422,14 @@ async def change_request_status(request_id: uuid.UUID, payload: RequestStatusUpd
     user=Depends(get_current_user), db: AsyncSession = Depends(get_db), trace=Depends(get_request_id)):
     from app.modules.interaction.request_management import change_status
     return await change_status(db, user=user, request_id=request_id, payload=payload, request_trace_id=trace)
+
+
+@router.post("/requests/{request_id}/reopen", response_model=RequestItem)
+async def reopen_request(request_id: uuid.UUID, payload: RequestReopen,
+    user=Depends(get_current_user), db: AsyncSession = Depends(get_db), trace=Depends(get_request_id)):
+    """复核重开：解决资源失效后由发起者或管理员带理由重开，回到 open 并清空解决资源。"""
+    from app.modules.interaction.request_management import reopen
+    return await reopen(db, user=user, request_id=request_id, payload=payload, request_trace_id=trace)
 
 
 @router.get("/requests/{request_id}/responses", response_model=CursorPage[RequestResponseItem])
