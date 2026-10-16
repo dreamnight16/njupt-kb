@@ -33,6 +33,7 @@ from app.modules.content.schemas import (
     VersionUpdate,
     WithdrawIn,
 )
+from app.modules.ratelimit.deps import rate_limit
 
 router = APIRouter(tags=["content"])
 
@@ -154,6 +155,7 @@ async def get_resource(
     resource_id: uuid.UUID,
     user=Depends(get_optional_user),
     db=Depends(get_db),
+    _rl: None = Depends(rate_limit("resource")),
 ):
     return await service.get_resource_detail(db, user=user, resource_id=resource_id)
 
@@ -292,6 +294,7 @@ async def create_upload(
     request: Request,
     user=Depends(require(RESOURCE_SUBMIT)),
     db=Depends(get_db),
+    _rl: None = Depends(rate_limit("upload")),
 ):
     body = payload.model_dump(mode="json")
 

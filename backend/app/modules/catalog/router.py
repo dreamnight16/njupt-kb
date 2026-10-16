@@ -32,6 +32,7 @@ from app.modules.catalog.schemas import (
     MajorBrief,
     OfferingItem,
 )
+from app.modules.ratelimit.deps import rate_limit
 
 if TYPE_CHECKING:  # pragma: no cover
     from app.modules.identity.models import User
@@ -55,6 +56,7 @@ async def list_courses(
     cursor: str | None = Query(None),
     limit: int | None = Query(None, ge=1, le=100),
     db: AsyncSession = Depends(get_db),
+    _rl: None = Depends(rate_limit("browse")),
 ) -> CursorPage[CourseListItem]:
     filters = CourseSearchFilters(
         university_id=_optional_uuid(university_id, "university_id"),
@@ -71,7 +73,9 @@ async def list_courses(
 
 @router.get("/courses/{course_id}", response_model=CourseDetail)
 async def get_course(
-    course_id: str, db: AsyncSession = Depends(get_db)
+    course_id: str,
+    db: AsyncSession = Depends(get_db),
+    _rl: None = Depends(rate_limit("browse")),
 ) -> CourseDetail:
     return await service.get_course_detail(db, parse_uuid(course_id, "course_id"))
 

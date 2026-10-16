@@ -37,6 +37,7 @@ class AppError(Exception):
         code: str | None = None,
         http_status: int | None = None,
         details: dict[str, Any] | None = None,
+        headers: dict[str, str] | None = None,
     ) -> None:
         super().__init__(message)
         self.message = message
@@ -45,6 +46,8 @@ class AppError(Exception):
         if http_status is not None:
             self.http_status = http_status
         self.details = details or {}
+        # 429 等需要随响应下发的头（如 Retry-After）；不改变错误体形状。
+        self.headers = headers or None
 
 
 class InvalidInput(AppError):
@@ -116,6 +119,7 @@ def install_error_handlers(app: FastAPI) -> None:
         return JSONResponse(
             status_code=exc.http_status,
             content=error_body(exc.code, exc.message, _request_id(request), exc.details),
+            headers=exc.headers,
         )
 
     @app.exception_handler(RequestValidationError)

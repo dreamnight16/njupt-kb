@@ -40,6 +40,7 @@ from app.modules.identity.schemas import (
     RegisterResponse,
     SessionItem,
 )
+from app.modules.ratelimit.deps import rate_limit
 
 router = APIRouter(tags=["identity"])
 
@@ -133,6 +134,7 @@ async def login(
     response: Response,
     db: AsyncSession = Depends(get_db),
     request_id: str = Depends(get_request_id),
+    _rl: None = Depends(rate_limit("login")),
 ) -> MeResponse:
     user, raw_token, _expires_at = await service.login(
         db,

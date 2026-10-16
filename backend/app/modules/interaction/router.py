@@ -39,6 +39,7 @@ from app.modules.interaction.schemas import (
     SearchItem,
     RecommendationsOut,
 )
+from app.modules.ratelimit.deps import rate_limit
 
 router = APIRouter(tags=["interaction"])
 
@@ -72,6 +73,7 @@ async def search_resources(
     limit: int | None = Query(default=None, ge=1, le=100),
     db: AsyncSession = Depends(get_db),
     user=Depends(get_optional_user),
+    _rl: None = Depends(rate_limit("search")),
 ) -> CursorPage[SearchItem]:
     """只返回已发布资源；查询失败返回 5xx，不吞成空列表（§39 A21）。"""
     return await service.search(
