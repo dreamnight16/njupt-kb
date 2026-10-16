@@ -16,4 +16,5 @@ from app.modules.interaction.models import *  # noqa: F401,F403
 from app.modules.jobs.models import *  # noqa: F401,F403
 from app.modules.moderation.models import *  # noqa: F401,F403
 from app.modules.notification.models import *  # noqa: F401,F403
+from app.modules.ratelimit.models import *  # noqa: F401,F403
 from app.modules.topics.models import *  # noqa: F401,F403

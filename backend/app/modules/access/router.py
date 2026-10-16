@@ -29,6 +29,7 @@ from app.modules.access.schemas import (
     PreviewGrantRequest,
     PreviewGrantResult,
 )
+from app.modules.ratelimit.deps import rate_limit
 
 router = APIRouter(tags=["access"])
 
@@ -63,6 +64,7 @@ async def create_download_grant(
     db: AsyncSession = Depends(get_db),
     request_id: str = Depends(get_request_id),
     idempotency_key: str | None = Header(default=None, alias="Idempotency-Key"),
+    _rl: None = Depends(rate_limit("download")),
 ) -> DownloadGrantResult:
     rid = parse_uuid(resource_id, "resource_id")
     return await service.issue_download_grant(
