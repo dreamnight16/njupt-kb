@@ -4,7 +4,7 @@
  */
 import { api } from './client';
 import type { CourseBrief } from './catalog';
-import type { CursorPage, ResourceType } from './types';
+import type { CursorPage, ReportStatus, ResourceType } from './types';
 
 export interface FollowItem {
   id: string;
@@ -36,6 +36,8 @@ export interface SearchItem {
 
 export interface RecommendationItem extends SearchItem {
   reasons: string[];
+  /** 是否为固定探索槽位项：其理由含「新内容，供探索」（§14 探索位）。 */
+  explore?: boolean;
 }
 
 export interface RecommendationsOut {
@@ -62,6 +64,8 @@ export interface CommentItem {
   created_at: string;
   status: 'visible' | 'withdrawn' | 'hidden';
   revision: number;
+  /** 仅对评论作者（或评论管理员）返回：管理员隐藏该评论时给出的处理理由。 */
+  moderation_reason?: string | null;
 }
 
 export interface CorrectionItem {
@@ -245,6 +249,117 @@ export async function moderateComment(resourceId: string, commentId: string, exp
   return (await api.post<CommentItem>(`/resources/${resourceId}/comments/${commentId}/moderation`, {
     expected_revision: expectedRevision, hidden, reason,
   })).data;
+}
+
+// --- 评论举报与申诉（§18、§20.2）---
+// 举报是普通用户能力；处理与申诉裁决由 REPORT_HANDLE 判定（服务端）。
+
+export interface CommentReportItem {
+  id: string;
+  resource_id: string;
+  comment_id: string;
+  reporter_id: string;
+  reason: string;
+  status: ReportStatus;
+  revision: number;
+  created_at: string;
+  updated_at: string;
+  comment_body: string | null;
+  comment_status: 'visible' | 'withdrawn' | 'hidden' | null;
+  comment_revision: number | null;
+  comment_author_id: string | null;
+}
+
+export interface CommentAppealItem {
+  id: string;
+  comment_id: string;
+  resource_id: string;
+  appellant_id: string;
+  reason: string;
+  status: 'pending' | 'accepted' | 'rejected';
+  revision: number;
+  handled_by: string | null;
+  handled_at: string | null;
+  created_at: string;
+  updated_at: string;
+  comment_status: 'visible' | 'withdrawn' | 'hidden' | null;
+  comment_revision: number | null;
+}
+
+export async function createCommentReport(
+  resourceId: string,
+  commentId: string,
+  reason: string,
+): Promise<CommentReportItem> {
+  return (await api.post<CommentReportItem>('/reports/comments', {
+    resource_id: resourceId,
+    comment_id: commentId,
+    reason,
+  })).data;
+}
+
+export async function createCommentAppeal(
+  resourceId: string,
+  commentId: string,
+  reason: string,
+): Promise<CommentAppealItem> {
+  return (await api.post<CommentAppealItem>('/comment-appeals', {
+    resource_id: resourceId,
+    comment_id: commentId,
+    reason,
+  })).data;
+}
+
+export async function listCommentReports(params: {
+  status?: ReportStatus[];
+  cursor?: string | null;
+  limit?: number;
+} = {}): Promise<CursorPage<CommentReportItem>> {
+  const { data } = await api.get<CursorPage<CommentReportItem>>('/admin/comment-reports', {
+    params: { ...params, cursor: params.cursor || undefined },
+  });
+  return data;
+}
+
+export async function decideCommentReport(
+  reportId: string,
+  payload: {
+    action: 'accept' | 'dismiss' | 'resolve';
+    reason: string;
+    expected_revision: number;
+    comment_revision?: number | null;
+  },
+): Promise<CommentReportItem> {
+  return (await api.post<CommentReportItem>(
+    `/admin/comment-reports/${reportId}/decision`,
+    payload,
+  )).data;
+}
+
+export async function listCommentAppeals(params: {
+  status?: Array<'pending' | 'accepted' | 'rejected'>;
+  cursor?: string | null;
+  limit?: number;
+} = {}): Promise<CursorPage<CommentAppealItem>> {
+  const { data } = await api.get<CursorPage<CommentAppealItem>>('/admin/comment-appeals', {
+    params: { ...params, cursor: params.cursor || undefined },
+  });
+  return data;
+}
+
+export async function decideCommentAppeal(
+  appealId: string,
+  payload: {
+    decision: 'accept' | 'reject';
+    reason: string;
+    expected_revision: number;
+    comment_revision?: number | null;
+  },
+): Promise<CommentAppealItem> {
+  return (await api.post<CommentAppealItem>(
+    `/admin/comment-appeals/${appealId}/decision`,
+    payload,
+  )).data;
 }
 
 export async function createCorrection(payload: {

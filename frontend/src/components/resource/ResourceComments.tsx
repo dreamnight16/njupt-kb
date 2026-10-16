@@ -9,7 +9,15 @@ import { Notice } from '@/components/common/Notice';
 import { Button } from '@/components/ui/Button';
 import { Modal } from '@/components/ui/Modal';
 import { describeError } from '@/lib/api/client';
-import { createComment, listComments, moderateComment, withdrawComment, type CommentItem } from '@/lib/api/interaction';
+import {
+  createComment,
+  createCommentAppeal,
+  createCommentReport,
+  listComments,
+  moderateComment,
+  withdrawComment,
+  type CommentItem,
+} from '@/lib/api/interaction';
 import { formatDateTime } from '@/lib/utils';
 import { isAdmin, useAuthStore } from '@/stores/authStore';
 import type { CursorPage } from '@/lib/api/types';
@@ -28,6 +36,10 @@ export function ResourceComments({ resourceId }: { resourceId: string }) {
   const [replyTo, setReplyTo] = useState<CommentItem | null>(null);
   const [action, setAction] = useState<{ item: CommentItem; kind: 'withdraw' | 'hide' | 'restore' } | null>(null);
   const [reason, setReason] = useState('');
+  const [reportTarget, setReportTarget] = useState<CommentItem | null>(null);
+  const [reportReason, setReportReason] = useState('');
+  const [appealTarget, setAppealTarget] = useState<CommentItem | null>(null);
+  const [appealReason, setAppealReason] = useState('');
   const queryKey = ['comments', resourceId, user?.id ?? 'guest'];
 
   const query = useInfiniteQuery({
@@ -79,6 +91,39 @@ export function ResourceComments({ resourceId }: { resourceId: string }) {
         setReason('');
       }
       queryClient.invalidateQueries({ queryKey: ['comments', resourceId] });
+    },
+  });
+
+  // 举报：理由必填；失败时保留理由，用户可再次提交重试。
+  const reportMutation = useMutation({
+    mutationFn: () => {
+      if (!reportTarget) throw new Error('请选择评论');
+      return createCommentReport(resourceId, reportTarget.id, reportReason.trim());
+    },
+    onSuccess: () => {
+      toast.success('举报已提交，我们会尽快处理');
+      setReportTarget(null);
+      setReportReason('');
+    },
+    onError: (error) => {
+      toast.error(describeError(error).message);
+    },
+  });
+
+  // 申诉：被隐藏评论的作者提交一次；采纳后评论恢复。
+  const appealMutation = useMutation({
+    mutationFn: () => {
+      if (!appealTarget) throw new Error('请选择评论');
+      return createCommentAppeal(resourceId, appealTarget.id, appealReason.trim());
+    },
+    onSuccess: () => {
+      toast.success('申诉已提交，等待处理');
+      setAppealTarget(null);
+      setAppealReason('');
+      queryClient.invalidateQueries({ queryKey: ['comments', resourceId] });
+    },
+    onError: (error) => {
+      toast.error(describeError(error).message);
     },
   });
 
@@ -181,6 +226,9 @@ export function ResourceComments({ resourceId }: { resourceId: string }) {
                 <p className="mt-1 whitespace-pre-line break-words text-sm text-text-primary">
                   {item.status === 'withdrawn' ? '该评论已由作者撤回' : item.status === 'hidden' ? '该评论已由管理员隐藏' : item.body}
                 </p>
+                {item.status === 'hidden' && item.moderation_reason && (
+                  <p className="mt-1 text-xs text-text-secondary">处理理由：{item.moderation_reason}</p>
+                )}
                 <div className="mt-2 flex flex-wrap items-center gap-3 text-xs text-text-secondary">
                   <span>{formatDateTime(item.created_at)}</span>
                   {canWrite && item.status === 'visible' && !item.parent_id && user?.id !== item.user_id && (
@@ -190,6 +238,16 @@ export function ResourceComments({ resourceId }: { resourceId: string }) {
                   )}
                   {canWrite && user?.id === item.user_id && item.status !== 'withdrawn' && (
                     <button type="button" className="min-h-11 underline underline-offset-2" onClick={() => openAction(item, 'withdraw')}>撤回评论</button>
+                  )}
+                  {canWrite && item.status === 'hidden' && user?.id === item.user_id && (
+                    <button type="button" className="min-h-11 underline underline-offset-2" onClick={() => { setAppealTarget(item); setAppealReason(''); }}>
+                      申诉
+                    </button>
+                  )}
+                  {canWrite && item.status === 'visible' && user?.id !== item.user_id && (
+                    <button type="button" className="min-h-11 underline underline-offset-2" onClick={() => { setReportTarget(item); setReportReason(''); }}>
+                      举报
+                    </button>
                   )}
                   {canWrite && isAdmin(user) && item.status !== 'withdrawn' && (
                     <button type="button" className="min-h-11 underline underline-offset-2" onClick={() => openAction(item, item.status === 'hidden' ? 'restore' : 'hide')}>
@@ -228,6 +286,50 @@ export function ResourceComments({ resourceId }: { resourceId: string }) {
             <Button onClick={() => management.mutate()} isLoading={management.isPending}
               disabled={!action || (action.kind !== 'withdraw' && !reason.trim())}>确认处理</Button>
             <Button variant="secondary" disabled={management.isPending} onClick={() => setAction(null)}>取消</Button>
+          </div>
+        </div>
+      </Modal>
+
+      <Modal isOpen={!!reportTarget} onClose={() => { if (!reportMutation.isPending) setReportTarget(null); }} title="举报评论">
+        <div className="space-y-4 p-6">
+          <p className="text-sm text-text-secondary">举报会进入独立工单，由管理员核实处理；请勿滥用。</p>
+          <div>
+            <label htmlFor="comment-report-reason" className="block text-sm font-medium">举报理由</label>
+            <textarea id="comment-report-reason" rows={3} maxLength={500} value={reportReason}
+              onChange={(event) => setReportReason(event.target.value)}
+              className="mt-2 w-full border border-control-border bg-surface p-2 text-sm"
+              placeholder="请填写 1–500 字的理由，说明该评论存在的问题。" />
+            <p className="mt-1 text-xs text-text-secondary">提交失败时理由会保留，可直接重试。</p>
+          </div>
+          <div className="flex gap-3">
+            <Button onClick={() => reportMutation.mutate()} isLoading={reportMutation.isPending}
+              disabled={!reportReason.trim()}>提交举报</Button>
+            <Button variant="secondary" disabled={reportMutation.isPending} onClick={() => setReportTarget(null)}>取消</Button>
+          </div>
+        </div>
+      </Modal>
+
+      <Modal isOpen={!!appealTarget} onClose={() => { if (!appealMutation.isPending) setAppealTarget(null); }} title="申诉评论">
+        <div className="space-y-4 p-6">
+          <p className="text-sm text-text-secondary">
+            这条评论已被管理员隐藏。你可以提交一次申诉，由管理员复核；采纳后评论会恢复展示。
+          </p>
+          {appealTarget?.moderation_reason && (
+            <p className="border border-divider bg-surface p-3 text-sm text-text-secondary">
+              处理理由：{appealTarget.moderation_reason}
+            </p>
+          )}
+          <div>
+            <label htmlFor="comment-appeal-reason" className="block text-sm font-medium">申诉理由</label>
+            <textarea id="comment-appeal-reason" rows={3} maxLength={500} value={appealReason}
+              onChange={(event) => setAppealReason(event.target.value)}
+              className="mt-2 w-full border border-control-border bg-surface p-2 text-sm"
+              placeholder="请填写 1–500 字的理由，说明为什么应当恢复。" />
+          </div>
+          <div className="flex gap-3">
+            <Button onClick={() => appealMutation.mutate()} isLoading={appealMutation.isPending}
+              disabled={!appealReason.trim()}>提交申诉</Button>
+            <Button variant="secondary" disabled={appealMutation.isPending} onClick={() => setAppealTarget(null)}>取消</Button>
           </div>
         </div>
       </Modal>

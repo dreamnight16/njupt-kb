@@ -12,7 +12,19 @@ import uuid
 from datetime import datetime, timezone
 from typing import Any, Literal
 
-from sqlalchemy import bindparam, delete, func, or_, select, text
+from sqlalchemy import (
+    DateTime,
+    String,
+    Text,
+    bindparam,
+    column,
+    delete,
+    func,
+    or_,
+    select,
+    table,
+    text,
+)
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -27,6 +39,7 @@ from app.core.enums import (
 )
 from app.core.errors import Conflict, Forbidden, InvalidInput, NotFound
 from app.core.events import emit_event
+from app.core.permissions import COMMENT_MODERATE, has_permission
 from app.core.pagination import (
     CursorPage,
     decode_cursor,
@@ -444,7 +457,7 @@ async def list_comments(
     has_more = len(rows) > page_size
     rows = rows[:page_size]
 
-    items = await _comment_items(db, rows)
+    items = await _comment_items(db, rows, viewer=user)
     next_cursor = (
         encode_cursor({"t": rows[-1].created_at.isoformat(), "i": str(rows[-1].id)})
         if has_more and rows
@@ -491,16 +504,24 @@ async def create_comment(
     return items[0]
 
 
-async def _comment_items(db: AsyncSession, comments: list[Comment]) -> list[CommentItem]:
+async def _comment_items(
+    db: AsyncSession, comments: list[Comment], viewer=None
+) -> list[CommentItem]:
     from app.modules.identity.service import display_name_of, get_users
 
     if not comments:
         return []
     users = await get_users(db, [c.user_id for c in comments])
+    hidden = [c for c in comments if c.is_hidden and c.withdrawn_at is None]
+    reasons = await _hide_reasons(db, [c.id for c in hidden]) if hidden else {}
     items: list[CommentItem] = []
     for comment in comments:
         user = users.get(comment.user_id)
         name = display_name_of(user) if user is not None else "已注销用户"
+        moderation_reason = None
+        if viewer is not None and comment.is_hidden and comment.withdrawn_at is None:
+            if viewer.id == comment.user_id or has_permission(viewer, COMMENT_MODERATE):
+                moderation_reason = reasons.get(comment.id)
         items.append(
             CommentItem(
                 id=comment.id,
@@ -512,9 +533,46 @@ async def _comment_items(db: AsyncSession, comments: list[Comment]) -> list[Comm
                 created_at=comment.created_at,
                 status=comment_status(comment),
                 revision=comment.revision,
+                moderation_reason=moderation_reason,
             )
         )
     return items
+
+
+async def _hide_reasons(
+    db: AsyncSession, comment_ids: list[uuid.UUID]
+) -> dict[uuid.UUID, str]:
+    """批量读取评论最近一次被隐藏的处理理由。
+
+    只读 moderation 拥有的 `audit_logs`（不导入对方模型类），不复制评论正文。
+    """
+    audit = table(
+        "audit_logs",
+        column("object_id", String(64)),
+        column("object_type", String(60)),
+        column("action", String(80)),
+        column("reason", Text),
+        column("created_at", DateTime(timezone=True)),
+    )
+    rows = await db.execute(
+        select(audit.c.object_id, audit.c.reason)
+        .where(
+            audit.c.object_type == "comment",
+            audit.c.action == "comment.hidden",
+            audit.c.object_id.in_([str(i) for i in comment_ids]),
+        )
+        .order_by(audit.c.created_at.desc())
+    )
+    result: dict[uuid.UUID, str] = {}
+    for object_id, reason in rows:
+        if not reason:
+            continue
+        try:
+            key = uuid.UUID(str(object_id))
+        except (TypeError, ValueError):
+            continue
+        result.setdefault(key, reason)
+    return result
 
 
 def comment_status(comment: Comment) -> Literal["visible", "withdrawn", "hidden"]:
