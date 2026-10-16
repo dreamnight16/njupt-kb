@@ -1,6 +1,8 @@
 'use client';
 
-import { ReactNode, useEffect } from 'react';
+import { ReactNode, useCallback, useEffect, useId, useRef } from 'react';
+import { createPortal } from 'react-dom';
+import { X } from 'lucide-react';
 
 interface ModalProps {
   isOpen: boolean;
@@ -9,45 +11,95 @@ interface ModalProps {
   children: ReactNode;
 }
 
+const FOCUSABLE =
+  'a[href], button:not([disabled]), textarea, input, select, [tabindex]:not([tabindex="-1"])';
+
+/**
+ * 模态层（DESIGN.md §6 Level 4、§12.3）：
+ * 直角、明确遮罩与阴影；Escape 关闭、焦点约束在层内、关闭后焦点返回触发元素。
+ */
 export function Modal({ isOpen, onClose, title, children }: ModalProps) {
+  const panelRef = useRef<HTMLDivElement>(null);
+  const previouslyFocused = useRef<HTMLElement | null>(null);
+  const titleId = useId();
+
+  const handleKeyDown = useCallback(
+    (event: KeyboardEvent) => {
+      if (event.key === 'Escape') {
+        event.stopPropagation();
+        onClose();
+        return;
+      }
+      if (event.key !== 'Tab' || !panelRef.current) return;
+      const nodes = panelRef.current.querySelectorAll<HTMLElement>(FOCUSABLE);
+      if (nodes.length === 0) return;
+      const first = nodes[0];
+      const last = nodes[nodes.length - 1];
+      if (event.shiftKey && document.activeElement === first) {
+        event.preventDefault();
+        last.focus();
+      } else if (!event.shiftKey && document.activeElement === last) {
+        event.preventDefault();
+        first.focus();
+      }
+    },
+    [onClose],
+  );
+
   useEffect(() => {
-    const handleEsc = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') onClose();
-    };
-    if (isOpen) {
-      document.addEventListener('keydown', handleEsc);
-      document.body.style.overflow = 'hidden';
-    }
+    if (!isOpen) return;
+    previouslyFocused.current = document.activeElement as HTMLElement | null;
+    document.body.style.overflow = 'hidden';
+    document.addEventListener('keydown', handleKeyDown);
+
+    // 打开后把焦点移入层内，但不清空底层页面内容。
+    const focusTarget =
+      panelRef.current?.querySelector<HTMLElement>(FOCUSABLE) ?? panelRef.current;
+    focusTarget?.focus();
+
     return () => {
-      document.removeEventListener('keydown', handleEsc);
-      document.body.style.overflow = 'unset';
+      document.removeEventListener('keydown', handleKeyDown);
+      document.body.style.overflow = '';
+      previouslyFocused.current?.focus?.();
     };
-  }, [isOpen, onClose]);
+  }, [isOpen, handleKeyDown]);
 
-  if (!isOpen) return null;
+  if (!isOpen || typeof document === 'undefined') return null;
 
-  return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center">
+  // 路由入场动效含 transform；挂到 body，避免 fixed 弹窗被页面容器裁切。
+  return createPortal(
+    <div className="fixed inset-0 z-[60] flex items-center justify-center p-4">
       <div
-        className="fixed inset-0 bg-black/50 transition-opacity"
+        className="fixed inset-0 bg-overlay"
         onClick={onClose}
+        aria-hidden="true"
       />
-      <div className="relative z-10 w-full max-w-md mx-4 bg-white rounded-2xl shadow-xl">
+      <div
+        ref={panelRef}
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby={title ? titleId : undefined}
+        tabIndex={-1}
+        className="relative z-10 max-h-[85vh] w-full max-w-md overflow-y-auto bg-surface shadow-3"
+      >
         {title && (
-          <div className="flex items-center justify-between px-6 py-4 border-b border-gray-200">
-            <h3 className="text-lg font-semibold text-gray-900">{title}</h3>
+          <div className="flex items-center justify-between border-b border-divider px-6 py-4">
+            <h2 id={titleId} className="text-lg font-semibold text-text-primary">
+              {title}
+            </h2>
             <button
+              type="button"
               onClick={onClose}
-              className="text-gray-400 hover:text-gray-600 transition-colors"
+              aria-label="关闭"
+              className="flex h-11 w-11 items-center justify-center text-text-secondary hover:bg-canvas hover:text-text-primary"
             >
-              <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
-              </svg>
+              <X className="h-5 w-5" aria-hidden="true" />
             </button>
           </div>
         )}
         <div className="p-6">{children}</div>
       </div>
-    </div>
+    </div>,
+    document.body,
   );
 }
