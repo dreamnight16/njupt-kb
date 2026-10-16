@@ -2,10 +2,12 @@ import Link from 'next/link';
 
 import { AppHeader } from '@/components/layout/AppHeader';
 import { AppTabBar } from '@/components/layout/AppTabBar';
+import { RouteProgress } from '@/components/layout/RouteProgress';
 
 export default function AppLayout({ children }: { children: React.ReactNode }) {
   return (
     <div className="flex min-h-screen flex-col">
+      <RouteProgress />
       <AppHeader />
       <main
         id="main-content"

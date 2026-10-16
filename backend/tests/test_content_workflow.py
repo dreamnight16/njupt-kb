@@ -165,6 +165,187 @@ class ContentWorkflowTests(unittest.IsolatedAsyncioTestCase):
         )
         self.assertEqual(result.items, [])
 
+    async def publish_public(self, title: str = "public note"):
+        self.version.title = title
+        self.version.review_status = "approved"
+        self.resource.published_version_id = self.version.id
+        self.resource.publication_status = "published"
+        self.db.add(
+            AccessPolicy(resource_id=self.resource.id, metadata_scope="public")
+        )
+        await self.db.commit()
+
+    async def test_keyword_search_finds_published_public_resource(self):
+        """带 q 的搜索要在 SQLite（本地开发/测试库）上同样可用。
+
+        回归：搜索 SQL 原先用 PostgreSQL 专有的 ILIKE / EXTRACT，在 SQLite 上直接
+        语法错误（500），导致本地界面搜索不可用。测试库是 SQLite，这条用例会守住它。
+        """
+        from app.modules.interaction.service import search
+
+        await self.publish_public(title="数据结构复习笔记")
+        result = await search(
+            self.db,
+            user=None,
+            q="复习",
+            university_id=None,
+            curriculum_id=None,
+            course_id=None,
+            semester_id=None,
+            teacher_id=None,
+            resource_type=None,
+            applicable_year=None,
+            cursor=None,
+            limit=20,
+        )
+        self.assertEqual([item.title for item in result.items], ["数据结构复习笔记"])
+
+    async def test_keyword_search_without_match_returns_empty(self):
+        from app.modules.interaction.service import search
+
+        await self.publish_public(title="数据结构复习笔记")
+        result = await search(
+            self.db,
+            user=None,
+            q="操作系统",
+            university_id=None,
+            curriculum_id=None,
+            course_id=None,
+            semester_id=None,
+            teacher_id=None,
+            resource_type=None,
+            applicable_year=None,
+            cursor=None,
+            limit=20,
+        )
+        self.assertEqual(result.items, [])
+
+    async def test_keyword_search_matches_course_name_with_uuid_params(self):
+        """q 命中课程名时要展开课程 ID 列表作为查询参数。
+
+        回归：裸 SQL 的 UUID 参数此前未声明类型，SQLite 的 DBAPI 拒绝 uuid.UUID
+        对象（Error binding parameter: type 'UUID' is not supported），而 PostgreSQL
+        的 psycopg 会自适应，所以只有本地/测试库上必现。
+        """
+        from app.modules.catalog.models import Course as CourseModel
+        from app.modules.content.models import Resource, ResourceVersion
+        from app.modules.interaction.service import search
+        from sqlalchemy import select
+
+        other_course = CourseModel(
+            university_id=self.school.id, name="数据结构导论", code="DS1"
+        )
+        self.db.add(other_course)
+        await self.db.flush()
+        other_resource = Resource(
+            course_id=other_course.id, owner_id=self.owner.id, resource_type="note"
+        )
+        self.db.add(other_resource)
+        await self.db.flush()
+        self.db.add(
+            ResourceVersion(
+                resource_id=other_resource.id,
+                created_by=self.owner.id,
+                version_no=1,
+                title="期中试卷",
+                review_status="approved",
+            )
+        )
+        await self.db.flush()
+        other_resource.published_version_id = (
+            await self.db.execute(
+                select(ResourceVersion.id).where(
+                    ResourceVersion.resource_id == other_resource.id
+                )
+            )
+        ).scalar_one()
+        other_resource.publication_status = "published"
+        self.db.add(
+            AccessPolicy(resource_id=other_resource.id, metadata_scope="public")
+        )
+        await self.db.commit()
+
+        result = await search(
+            self.db,
+            user=None,
+            q="数据结构",
+            university_id=None,
+            curriculum_id=None,
+            course_id=None,
+            semester_id=None,
+            teacher_id=None,
+            resource_type=None,
+            applicable_year=None,
+            cursor=None,
+            limit=20,
+        )
+        self.assertEqual([item.title for item in result.items], ["期中试卷"])
+
+    async def test_applicable_year_filter_matches_semester_start_date(self):
+        """按适用年份筛选同样要跨方言可用（PostgreSQL EXTRACT / SQLite strftime）。"""
+        from datetime import date
+
+        from sqlalchemy import select
+
+        from app.modules.catalog.models import CourseOffering, Semester
+        from app.modules.interaction.service import search
+
+        await self.publish_public(title="2025 秋季笔记")
+        semester = Semester(
+            university_id=self.school.id,
+            academic_year="2025-2026",
+            season="fall",
+            start_date=date(2025, 9, 1),
+            end_date=date(2026, 1, 15),
+        )
+        self.db.add(semester)
+        await self.db.flush()
+        self.db.add(
+            CourseOffering(course_id=self.course.id, semester_id=semester.id)
+        )
+        await self.db.flush()
+        self.resource.offering_id = (
+            await self.db.execute(
+                select(CourseOffering.id).where(
+                    CourseOffering.course_id == self.course.id,
+                    CourseOffering.semester_id == semester.id,
+                )
+            )
+        ).scalar_one()
+        await self.db.commit()
+
+        result = await search(
+            self.db,
+            user=None,
+            q=None,
+            university_id=None,
+            curriculum_id=None,
+            course_id=None,
+            semester_id=None,
+            teacher_id=None,
+            resource_type=None,
+            applicable_year=2025,
+            cursor=None,
+            limit=20,
+        )
+        self.assertEqual([item.title for item in result.items], ["2025 秋季笔记"])
+
+        miss = await search(
+            self.db,
+            user=None,
+            q=None,
+            university_id=None,
+            curriculum_id=None,
+            course_id=None,
+            semester_id=None,
+            teacher_id=None,
+            resource_type=None,
+            applicable_year=2024,
+            cursor=None,
+            limit=20,
+        )
+        self.assertEqual(miss.items, [])
+
     async def test_rejected_version_can_be_revised_without_overwriting_history(self):
         self.version.review_status = "rejected"
         await self.db.commit()

@@ -31,9 +31,6 @@ function Queue() {
   return (
     <div className="space-y-4">
       <h2 className="dn-display text-2xl">评论管理</h2>
-      <p className="text-sm text-text-secondary">
-        已发布资料的评论；撤回和隐藏正文继续遮蔽，处理请进入资料讨论区。
-      </p>
       <Button variant="secondary" onClick={() => setHidden(!hidden)}>
         {hidden ? "查看全部评论" : "只看已隐藏"}
       </Button>

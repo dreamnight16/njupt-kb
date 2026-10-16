@@ -1,6 +1,6 @@
 'use client';
 
-import { useState } from 'react';
+import { useRef, useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import toast from 'react-hot-toast';
 import { Avatar } from '@/components/common/Avatar';
@@ -10,7 +10,10 @@ import { listColleges, listMajors } from '@/lib/api/catalog';
 import { describeError } from '@/lib/api/client';
 import { useAuthStore } from '@/stores/authStore';
 
-const AVATAR_TYPES = ['image/png', 'image/jpeg', 'image/webp'];
+// 同时给扩展名与 MIME：Windows 的文件选择器常把 JPEG 报成 image/jpg / image/pjpeg，
+// 只写 image/jpeg 会在系统选择器里直接看不到 .jpg 文件。
+const AVATAR_ACCEPT = '.png,.jpg,.jpeg,.webp,.gif,image/png,image/jpeg,image/jpg,image/pjpeg,image/webp,image/gif';
+const AVATAR_TYPES = ['image/png', 'image/jpeg', 'image/jpg', 'image/pjpeg', 'image/webp', 'image/gif'];
 const AVATAR_MAX_BYTES = 2 * 1024 * 1024;
 
 export default function ProfilePage() {
@@ -28,12 +31,19 @@ function ProfileForm({ user }: { user: MeResponse }) {
   const [year, setYear] = useState(user.enrollment_year?.toString() || '');
   const [busy, setBusy] = useState(false);
   const [avatarBusy, setAvatarBusy] = useState(false);
+  const [avatarName, setAvatarName] = useState<string | null>(null);
+  const avatarInput = useRef<HTMLInputElement>(null);
   const inputClass = 'mt-1 min-h-11 w-full border border-control-border bg-surface px-3 py-2 text-sm';
   const colleges = useQuery({ queryKey: ['profile-colleges'], queryFn: listColleges });
   const majors = useQuery({ queryKey: ['profile-majors', college], queryFn: () => listMajors(college || undefined), enabled: !!college });
 
   async function pickAvatar(file: File) {
-    if (!AVATAR_TYPES.includes(file.type)) { toast.error('头像仅支持 PNG、JPEG 或 WebP'); return; }
+    // 归一浏览器给出的非标准 MIME，避免 .jpg 被误拒。
+    const type = file.type === 'image/jpg' || file.type === 'image/pjpeg' ? 'image/jpeg' : file.type;
+    if (!AVATAR_TYPES.includes(file.type) && !AVATAR_TYPES.includes(type)) {
+      toast.error('头像仅支持 PNG、JPG、WebP 或 GIF');
+      return;
+    }
     if (file.size <= 0 || file.size > AVATAR_MAX_BYTES) { toast.error('头像需在 0–2 MiB 内'); return; }
     setAvatarBusy(true);
     try {
@@ -62,18 +72,42 @@ function ProfileForm({ user }: { user: MeResponse }) {
     } catch (error) { toast.error(describeError(error).message); } finally { setBusy(false); }
   }}>
     <h2 className="text-xl font-semibold">个人资料</h2>
-    <p className="text-sm text-text-secondary">头像直接上传，性别、简介、学院专业和入学年份均可选，可随时清空；不会改变账号认证与权限。</p>
     <div className="flex flex-wrap items-center gap-3 border-b border-divider pb-4">
       <Avatar url={user.avatar_url} name={name} />
-      <label className="text-sm">
-        <span className="mb-1 block font-medium">上传头像</span>
-        <input aria-label="上传头像" type="file" accept="image/png,image/jpeg,image/webp" disabled={avatarBusy}
-          onChange={e => { const file = e.target.files?.[0]; e.target.value = ''; if (file) void pickAvatar(file); }}
-          className="block text-sm" />
-        <span className="mt-1 block text-xs text-text-secondary">支持 PNG、JPEG、WebP，不超过 2 MiB。</span>
-      </label>
-      {user.avatar_url && <Button type="button" variant="ghost" disabled={avatarBusy} onClick={() => void clearAvatar()}>恢复默认头像</Button>}
-      {avatarBusy && <p role="status" className="text-sm text-text-secondary">头像处理中…</p>}
+      <div className="flex flex-wrap items-center gap-2">
+        <input
+          ref={avatarInput}
+          aria-label="上传头像"
+          type="file"
+          accept={AVATAR_ACCEPT}
+          disabled={avatarBusy}
+          onChange={e => {
+            const file = e.target.files?.[0];
+            e.target.value = '';
+            if (file) { setAvatarName(file.name); void pickAvatar(file); }
+          }}
+          className="sr-only"
+        />
+        <Button
+          type="button"
+          variant="secondary"
+          disabled={avatarBusy}
+          onClick={() => avatarInput.current?.click()}
+        >
+          {avatarBusy ? '上传中…' : '更换头像'}
+        </Button>
+        {avatarName && (
+          <span className="max-w-40 truncate text-xs text-text-secondary" title={avatarName}>
+            {avatarName}
+          </span>
+        )}
+        {user.avatar_url && (
+          <Button type="button" variant="ghost" disabled={avatarBusy} onClick={() => { setAvatarName(null); void clearAvatar(); }}>
+            恢复默认头像
+          </Button>
+        )}
+      </div>
+      <p className="w-full text-xs text-text-secondary">支持 PNG、JPG、WebP、GIF，不超过 2 MiB。</p>
     </div>
     <fieldset disabled={busy} className="space-y-4">
       <label className="block text-sm">昵称<input required maxLength={80} value={name} onChange={e => setName(e.target.value)} className={inputClass} /></label>

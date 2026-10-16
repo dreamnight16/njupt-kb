@@ -31,9 +31,6 @@ export default async function HomePage() {
         <h1 className="dn-display mt-3 max-w-2xl text-3xl md:text-4xl">
           找到这门课需要的资料
         </h1>
-        <p className="mt-4 max-w-xl text-on-color">
-          输入课程名、代码或资料标题开始；结果按课程组织，便于判断适用范围后再阅读或下载。
-        </p>
         <div className="mt-6 max-w-2xl">
           <SearchBox size="lg" />
         </div>
@@ -82,17 +79,17 @@ export default async function HomePage() {
 
         {coursesResult.error ? (
           <Notice tone="warning" title="课程目录暂时无法加载">
-            {coursesResult.error.message}。可以稍后刷新，或直接使用搜索。
+            {coursesResult.error.message}。可稍后刷新或用搜索。
           </Notice>
         ) : coursesResult.data && coursesResult.data.items.length > 0 ? (
-          <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+          <div className="dn-stagger grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
             {coursesResult.data.items.map((course) => (
               <CourseCard key={course.id} course={course} />
             ))}
           </div>
         ) : (
           <Notice tone="info" title="课程目录中还没有可展示的课程">
-            目录由维护者导入真实数据后在此显示。你可以先使用搜索查找资料。
+            目录由维护者导入；可先使用搜索。
           </Notice>
         )}
       </section>
@@ -117,7 +114,7 @@ export default async function HomePage() {
             {recentResult.error.message}。这不表示没有资料。
           </Notice>
         ) : recentResult.data && recentResult.data.items.length > 0 ? (
-          <div className="grid gap-4 sm:grid-cols-2">
+          <div className="dn-stagger grid gap-4 sm:grid-cols-2">
             {recentResult.data.items.map((item) => (
               <ResourceCard
                 key={item.resource_id}
@@ -133,7 +130,7 @@ export default async function HomePage() {
           </div>
         ) : (
           <Notice tone="info" title="还没有已发布的资料">
-            资料通过审核并发布后才会出现在这里。你可以在登录后上传自己的资料。
+            审核并发布后显示在这里；登录后可上传资料。
           </Notice>
         )}
       </section>

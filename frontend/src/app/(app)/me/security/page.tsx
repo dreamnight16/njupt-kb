@@ -176,7 +176,7 @@ export default function SecurityPage() {
           登录会话
         </h2>
         <p className="mt-2 text-sm text-text-secondary">
-          会话事实保存在服务端；撤销后该设备需要重新登录。
+          撤销后该设备需要重新登录。
         </p>
         <div className="mt-4">
           {sessionsQuery.isLoading ? (
@@ -238,7 +238,6 @@ export default function SecurityPage() {
             </ul>
           ) : (
             <Notice tone="info" title="没有其他活跃会话">
-              这里只会列出你自己的会话。
             </Notice>
           )}
         </div>
@@ -280,11 +279,6 @@ export default function SecurityPage() {
             导出我的数据
           </Button>
         </div>
-        <p className="mt-2 text-sm text-text-secondary">
-          导出内容只包含你自己的账号资料、关注与收藏、评分、评论、上传资料清单、通知、需求与会话列表，
-          不包含文件本体、下载链接或他人数据。
-        </p>
-
         <div className="mt-6 border-t border-divider pt-6">
           <h3 className="text-base font-medium text-text-primary">注销账号</h3>
           <Notice tone="error" title="注销将立即生效且不可撤销">

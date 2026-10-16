@@ -59,7 +59,7 @@ export default function AdminCorrectionsPage() {
   return (
     <div className="space-y-6">
       <p className="max-w-2xl text-sm text-text-secondary">
-        纠错工单绑定具体版本。接受或修复会记为该提交者的正向贡献，不会惩罚被纠错的贡献者（§20.2）。
+        接受或修复会记为该提交者的正向贡献，不会惩罚被纠错的贡献者（§20.2）。
       </p>
 
       <div className="flex flex-wrap items-center gap-2">
@@ -128,9 +128,7 @@ export default function AdminCorrectionsPage() {
           ))}
         </ul>
       ) : (
-        <Notice tone="info" title="当前没有待处理纠错">
-          用户在资料详情页提交的纠错会出现在这里。
-        </Notice>
+        <Notice tone="info" title="当前没有待处理纠错" />
       )}
 
       {active && (

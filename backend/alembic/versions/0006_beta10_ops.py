@@ -11,7 +11,7 @@ from alembic import op
 import sqlalchemy as sa
 
 revision = "0006_beta10_ops"
-down_revision = "0004_beta9"
+down_revision = "0005_beta10_account"
 branch_labels = None
 depends_on = None
 

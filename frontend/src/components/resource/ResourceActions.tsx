@@ -361,9 +361,6 @@ export function ResourceActions({
         ) : (
           <p className="mt-3 text-sm text-text-secondary">该资料没有可评价的公开版本。</p>
         )}
-        <p className="mt-2 text-xs text-text-secondary">
-          评价资格需先获得该内容的访问权，避免未接触内容的请求影响评分。
-        </p>
       </section>
 
       <Modal isOpen={reportOpen} onClose={() => setReportOpen(false)} title="举报或纠错">

@@ -67,7 +67,6 @@ export default function NotificationsPage() {
         <p role="status">正在加载通知…</p>
       ) : query.data?.pages.every((p) => !p.items.length) ? (
         <Notice title="还没有通知">
-          关注的课程、创作者与资料需求有更新后会在此通知你。
         </Notice>
       ) : (
         <ul className="space-y-3">

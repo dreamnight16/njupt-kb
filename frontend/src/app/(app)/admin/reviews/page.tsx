@@ -124,7 +124,7 @@ export default function AdminReviewsPage() {
                     </Link>
                   </div>
                   <p className="mt-2 text-xs text-text-secondary">
-                    风险提示：后端未提供结构化风险提示接口，审核员需自行查看文件与来源后判断。
+                    后端未提供结构化风险提示，请自行查看文件与来源后判断。
                   </p>
                 </div>
                 <Button
@@ -176,7 +176,7 @@ export default function AdminReviewsPage() {
           </div>
           {confirmReject && (
             <Notice tone="warning" title="确认驳回？">
-              驳回会通知作者并保留该快照作为审核证据；已发布的旧版本不受影响。
+              驳回会通知作者；已发布的旧版本不受影响。
               决定不可原地覆盖，作者修订后会形成新的提交。
             </Notice>
           )}

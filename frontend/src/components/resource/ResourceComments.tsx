@@ -198,9 +198,7 @@ export function ResourceComments({ resourceId }: { resourceId: string }) {
           {describeError(query.error).message}
         </Notice>
       ) : comments.length === 0 ? (
-        <Notice tone="info" title="还没有评论">
-          第一条评论可以说明资料是否适用，帮助其他同学判断。
-        </Notice>
+        <Notice tone="info" title="还没有评论" />
       ) : (
         <>
           <ul className="space-y-3">

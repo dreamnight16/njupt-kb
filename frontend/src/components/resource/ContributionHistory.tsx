@@ -55,7 +55,7 @@ export function ContributionHistory() {
             </ul>
           ) : (
             <Notice tone="info" title="还没有提交过纠错">
-              在资料详情页可以使用「举报或纠错」提交问题。
+              在资料详情页用「举报或纠错」提交问题。
             </Notice>
           )}
         </div>
@@ -90,8 +90,8 @@ export function ContributionHistory() {
             </ul>{requestsQuery.hasNextPage && <Button onClick={()=>requestsQuery.fetchNextPage()} isLoading={requestsQuery.isFetchingNextPage}>更多我的需求</Button>}</>
           ) : (
             <Notice tone="info" title="还没有发布过资料需求">
-              可以在<Link href="/requests" className="underline underline-offset-2">求资料</Link>
-              中为课程提出需求，或关注他人已有的需求。
+              在<Link href="/requests" className="underline underline-offset-2">求资料</Link>
+              中为课程提出需求。
             </Notice>
           )}
         </div>

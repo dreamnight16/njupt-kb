@@ -29,7 +29,7 @@ export default async function UploadPage({ searchParams }: {
           <p className="dn-kicker">UPLOAD</p>
           <h1 className="dn-display mt-2 text-3xl">上传资料</h1>
           <p className="mt-2 max-w-2xl text-on-ink">
-            选择课程与文件，补充标题和来源后提交审核。未完成时可以保存草稿，稍后继续。
+            未完成时可以保存草稿，稍后继续。
           </p>
         </header>
         {course_id && !courseResult?.data && <Notice tone="warning" title="未能带入课程">请重新搜索并选择课程。</Notice>}

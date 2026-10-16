@@ -31,7 +31,7 @@ export default function MyContributionsPage() {
   return (
     <div className="space-y-8">
       <Notice tone="info" title="贡献与收益分开">
-        贡献记录用于展示与运营，不承诺兑换现金；资金相关能力在商业化阶段单独开放（§24.1）。
+        贡献记录用于展示与运营，不承诺兑换现金。
       </Notice>
 
       <section aria-labelledby="contribution-summary">
@@ -90,7 +90,7 @@ function SummaryBlock({ profile }: { profile: CreatorSelfProfileOut }) {
         </dl>
       ) : (
         <Notice tone="info" title="还没有贡献记录">
-          资料通过审核、修订被采纳或纠错被采纳后会记为贡献。你可以先
+          资料发布、纠错被采纳后会记为贡献。先
           <Link href="/upload" className="underline underline-offset-2">上传资料</Link>。
         </Notice>
       )}
@@ -131,7 +131,7 @@ function ContributionProfileForm({ profile }: { profile: CreatorSelfProfileOut }
         贡献者资料
       </h2>
       <p className="mt-2 max-w-3xl text-sm text-text-secondary">
-        昵称与头像跟随「个人资料」，这里只维护一句话介绍和简介。关闭公开后，他人只能看到你的昵称与贡献次数。
+        关闭公开后，他人只能看到你的昵称与贡献次数。
       </p>
       <form
         className="mt-3 max-w-2xl space-y-4 border border-divider bg-surface p-5"
@@ -204,8 +204,7 @@ function ContributionList() {
           </Notice>
         ) : items.length === 0 ? (
           <Notice tone="info" title="还没有贡献记录">
-            被采纳的纠错、被采纳的修订与审核通过的资料都会记录在这里。
-          </Notice>
+            </Notice>
         ) : (
           <ul className="space-y-3">
             {items.map((item) => (

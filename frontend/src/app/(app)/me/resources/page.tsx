@@ -25,7 +25,7 @@ export default function MyResourcesPage() {
     {query.isPending && <p role="status">正在加载你的资料…</p>}
     {query.error && <Notice title="资料列表加载失败" tone="warning"
       action={<Button onClick={() => query.refetch()}>重试</Button>}>{describeError(query.error).message}</Notice>}
-    {query.data?.pages[0].items.length === 0 && <Notice title="还没有资料" tone="info">上传文件并保存草稿后，会在这里显示。</Notice>}
+    {query.data?.pages[0].items.length === 0 && <Notice title="还没有资料" tone="info" />}
     <ul className="space-y-3">{query.data?.pages.flatMap(page => page.items).map(item =>
       <li key={item.id} className="border border-divider bg-surface p-5">
         <div className="flex flex-wrap justify-between gap-3">

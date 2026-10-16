@@ -302,8 +302,8 @@ export function UploadFlow({ initialCourse = null, initialType = 'note', request
 
   if (submitted) return (
     <Notice tone="info" title="已提交审核">
-      {requestId && <p>资料审核发布后，请回到原需求提交候选，供发起者核对。</p>}{requestId && <Link href={`/requests/${requestId}`} className="block min-h-11 content-center text-brand underline">返回原需求</Link>}
-      <p>审核通过后资料才会公开。你可以在我的资料中查看进度与审核意见。</p>
+      {requestId && <p>发布后回到原需求提交候选。</p>}{requestId && <Link href={`/requests/${requestId}`} className="block min-h-11 content-center text-brand underline">返回原需求</Link>}
+      <p>可在「我的资料」查看进度与审核意见。</p>
       <Link href="/me/resources" className="mt-3 inline-flex min-h-11 items-center bg-brand px-4 text-sm text-on-color">查看我的资料</Link>
     </Notice>
   );
@@ -624,7 +624,6 @@ export function UploadFlow({ initialCourse = null, initialType = 'note', request
 
       {/* 提交时自动保存；暂存草稿仍是独立操作。 */}
       <StepBlock index={3} title="提交审核" tone="bg-amber">
-        <p className="text-sm text-text-secondary">提交会自动保存当前内容并交给审核员，通过后才会公开。还没准备好可以只保存草稿。</p>
         <div className="mt-4 flex flex-wrap gap-3">
           <Button variant="secondary" onClick={handleSaveDraft} isLoading={saving} disabled={!canSave}>
             保存草稿

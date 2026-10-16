@@ -74,7 +74,7 @@ function SnapshotEditor({ detail }: { detail: VersionDetail }) {
   const field = 'w-full border border-control-border bg-surface p-3 text-sm text-text-primary';
   return <section className="space-y-5">
     <header><h2 className="dn-display text-2xl">{version.title} · V{version.version_no}</h2>
-      <p className="mt-2 text-sm text-text-secondary">{editable ? '草稿可以编辑，提交后将冻结。' : detail.can_edit ? '这个快照已冻结。需要修改时请创建新修订。' : '正在检查指定版本的快照，原件与来源均属于这个版本。'}</p></header>
+      {!editable && detail.can_edit && <p className="mt-2 text-sm text-text-secondary">这个快照已冻结，需要修改时请创建新修订。</p>}</header>
     {detail.review_reason && <Notice title="最近审核意见" tone={version.review_status === 'rejected' ? 'warning' : 'info'}>{detail.review_reason}</Notice>}
     {error && <Notice title="操作未完成" tone="warning">{error}</Notice>}
     <fieldset disabled={busy || !editable} className="space-y-4" onChange={() => setSaved(false)}>

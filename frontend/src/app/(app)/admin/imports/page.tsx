@@ -93,7 +93,7 @@ export default function BulkImportPage() {
   const eligible = rows.some(r => r.confirmed && r.course && r.title.trim() && !r.submitted);
   return <div className="space-y-5">
     <h2 className="text-2xl font-semibold">批量上传资料</h2>
-    <p className="max-w-3xl text-sm text-text-secondary">每个文件生成一份独立资料。按文件名匹配课程代码、名称、别名及资料类型；请逐项核对分类与来源。安全检查通过后仍需其他审核员审核。</p>
+    <p className="max-w-3xl text-sm text-text-secondary">按文件名自动匹配分类，请逐项核对分类与来源。</p>
     <fieldset disabled={busy} className="min-w-0 space-y-5">
       <label className="block border border-dashed border-control-border p-5 text-sm">选择文件（每批最多 50 个，单文件最多 50 MiB）<input aria-label="批量选择文件" type="file" multiple accept=".pdf,.png,.jpg,.jpeg,.docx,.pptx" className="mt-3 block w-full" onChange={e => { void selectFiles(Array.from(e.target.files || [])); e.target.value = ''; }} /></label>
       {rows.map((r, index) => <section key={r.id} className="min-w-0 space-y-3 border border-divider bg-surface p-4">

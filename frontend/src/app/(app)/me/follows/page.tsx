@@ -36,10 +36,6 @@ export default function MyFollowsPage() {
 
   return (
     <div className="space-y-6">
-      <Notice tone="info" title="关注与收藏不同">
-        关注作用于课程或创作者，用于接收更新；收藏针对具体资料（§20.2）。
-      </Notice>
-
       {query.isLoading ? (
         <SkeletonList count={3} />
       ) : query.error ? (
@@ -108,7 +104,7 @@ export default function MyFollowsPage() {
       ) : (
         <EmptyState
           title="还没有关注任何课程或创作者"
-          description="在课程页可以关注课程，更新会进入通知。"
+          description="在课程页或贡献者主页可关注。"
         />
       )}
     </div>

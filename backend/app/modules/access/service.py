@@ -736,7 +736,9 @@ async def _find_preview_derivative(
     ).first()
     if row is None:
         return None
-    return row[0], str(row[1])
+    # SQLite 的 uuid 列以无连字符字符串存储，裸 SQL 读回是 str；统一成 UUID 对象，
+    # 与 PostgreSQL native uuid 驱动的返回一致，便于后续写入 uuid 列。
+    return uuid.UUID(str(row[0])), str(row[1])
 
 
 async def _is_school_verified(db: AsyncSession, user: "User") -> bool:

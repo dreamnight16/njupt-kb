@@ -74,7 +74,7 @@ export function PasswordResetForm({ token }: { token: string }) {
         <p className="dn-kicker text-text-secondary">PASSWORD RESET</p>
         <h2 className="dn-display mt-1 text-3xl">重置密码</h2>
         <p className="mt-2 text-sm text-text-secondary">
-          输入邮件中的重置令牌与新密码。重置成功后所有已登录会话都会失效，需要重新登录。
+          重置成功后所有已登录会话都会失效，需要重新登录。
         </p>
       </header>
 
@@ -138,7 +138,7 @@ export function PasswordResetForm({ token }: { token: string }) {
         <section className="border border-divider bg-surface p-4">
           <h3 className="text-sm font-medium text-text-primary">没有收到邮件？</h3>
           <p className="mt-1 text-sm text-text-secondary">
-            邮件可能被拦截或仍在有效期内。可以重新申请一封重置邮件（不区分邮箱是否已注册）。
+            邮件可能被拦截；可重新申请（不区分邮箱是否已注册）。
           </p>
           <div className="mt-3 flex flex-wrap items-end gap-3">
             <div className="min-w-0 flex-1">

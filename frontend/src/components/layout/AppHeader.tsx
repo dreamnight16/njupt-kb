@@ -63,12 +63,15 @@ export function AppHeader() {
         跳到主要内容
       </a>
       <div className="mx-auto flex h-15 max-w-6xl items-center gap-4 px-4">
-        <Link href="/" className="flex shrink-0 items-center gap-2">
-          <span className="grid h-9 w-9 place-items-center bg-brand text-base font-semibold text-on-color">
-            邮
-          </span>
-          <span className="dn-display hidden text-lg text-text-primary sm:block">
-            南邮课程知识平台
+        <Link href="/" className="flex shrink-0 items-center gap-2" aria-label="南邮课程知识平台 · 返回首页">
+          {/* 品牌标识用排版而非图标：校方徽标未获授权前不虚构校徽（DESIGN.md §3）。 */}
+          <span className="flex flex-col leading-none">
+            <span className="text-[0.5625rem] font-semibold tracking-[0.22em] text-text-secondary">
+              南京邮电大学
+            </span>
+            <span className="dn-display mt-1 text-base text-text-primary sm:text-lg">
+              课程知识平台
+            </span>
           </span>
         </Link>
 

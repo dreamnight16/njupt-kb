@@ -80,8 +80,7 @@ function Catalog() {
   return (
     <div className="space-y-6">
       <p className="max-w-2xl text-sm text-text-secondary">
-        停用是软停用：不再出现在前台选择器与搜索，但已关联资料仍可正常读取；合并会把源项
-        的引用归并到目标项并保留影响面记录。改名与合并都会写入审计日志。
+        停用是软停用，已关联资料仍可正常读取；合并把源项引用归并到目标项。改名与合并会写入审计日志。
       </p>
 
       <div className="flex flex-wrap gap-1">

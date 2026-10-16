@@ -180,9 +180,6 @@ export function RequestWorkspace({ requestId }: { requestId: string }) {
       {row.status === "open" && (
         <section className="space-y-3" aria-label="回应需求">
           <h2 className="dn-display text-2xl">提交候选资料</h2>
-          <p className="text-sm text-text-secondary">
-            候选资料需已发布并属于同一课程，发起者或管理员核对后确认解决。
-          </p>
           {active ? (
             <>
               <label className="block text-sm">
@@ -328,9 +325,6 @@ export function RequestWorkspace({ requestId }: { requestId: string }) {
         }
       >
         <div className="space-y-4 p-6">
-          <p className="text-sm">
-            处理结果会通知发起者和关注者。上传或提交候选不会自动解决需求。
-          </p>
           <label className="block text-sm">
             处理理由{action?.status === "fulfilled" ? "（可选）" : ""}
             <textarea

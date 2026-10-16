@@ -92,6 +92,29 @@ def _escape_like(value: str) -> str:
     return value.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
 
 
+def _as_uuid(value: Any) -> uuid.UUID:
+    """把裸 SQL 读回的 uuid 列值统一成 UUID 对象。
+
+    PostgreSQL 的 native uuid 列由驱动返回 UUID；SQLite 以 CHAR(32) 存储无连字符
+    字符串，读回是 str。下游（如 expanding bindparam 的 Uuid 类型）要求 UUID 对象。
+    """
+    return value if isinstance(value, uuid.UUID) else uuid.UUID(str(value))
+
+
+def _like_fragments(db: AsyncSession) -> tuple[str, str]:
+    """按方言返回 (大小写不敏感匹配运算符, 年份提取表达式)。
+
+    PostgreSQL 用 `ILIKE` / `EXTRACT`；SQLite（本地开发与测试库）没有这两个语法，
+    这里用等价物替换：SQLite 的 `LIKE` 对 ASCII 本就大小写不敏感（中文无大小写），
+    年份用 `strftime` 提取后再 CAST 成整数，行为与 `EXTRACT` 一致。
+    """
+    bind = db.get_bind()
+    dialect = bind.dialect.name if bind is not None else "postgresql"
+    if dialect == "sqlite":
+        return "LIKE", "CAST(strftime('%Y', start_date) AS INTEGER)"
+    return "ILIKE", "EXTRACT(YEAR FROM start_date)"
+
+
 # =====================================================================
 # 评价（§20.1、§29 幂等）
 # =====================================================================
@@ -105,11 +128,17 @@ async def has_access_history(
     依据 download_grants / preview_grants 的实际发放记录判断，避免未接触内容的匿名刷分。
     access 模块未声明"查询历史"接口，这里只读其表，不导入对方模型类。
     """
+    from sqlalchemy import Uuid
+
     stmt = text(
         "SELECT 1 FROM download_grants WHERE user_id = :uid AND resource_id = :rid "
         "UNION ALL "
         "SELECT 1 FROM preview_grants WHERE user_id = :uid AND resource_id = :rid "
         "LIMIT 1"
+    ).bindparams(
+        # UUID 参数声明类型：SQLite 的 DBAPI 不接受 uuid.UUID 对象（见 search() 内注释）。
+        bindparam("uid", type_=Uuid()),
+        bindparam("rid", type_=Uuid()),
     )
     row = (await db.execute(stmt, {"uid": user_id, "rid": resource_id})).first()
     return row is not None
@@ -1092,18 +1121,29 @@ async def _match_course_ids(db: AsyncSession, query: str) -> list[uuid.UUID]:
 
 
 async def _course_ids_of_curriculum(db: AsyncSession, curriculum_id: uuid.UUID) -> set[uuid.UUID]:
+    from sqlalchemy import Uuid
+
     rows = await db.execute(
-        text("SELECT course_id FROM curriculum_courses WHERE curriculum_id = :cid"),
+        text("SELECT course_id FROM curriculum_courses WHERE curriculum_id = :cid").bindparams(
+            bindparam("cid", type_=Uuid())
+        ),
         {"cid": curriculum_id},
     )
-    return {row[0] for row in rows}
+    # SQLite 的 uuid 列以无连字符字符串存储，裸 SQL 读回的是 str；统一转回 UUID，
+    # 让调用方（含 expanding bindparam 的类型化绑定）拿到一致的对象。
+    return {_as_uuid(row[0]) for row in rows}
 
 
 async def _course_ids_of_university(db: AsyncSession, university_id: uuid.UUID) -> set[uuid.UUID]:
+    from sqlalchemy import Uuid
+
     rows = await db.execute(
-        text("SELECT id FROM courses WHERE university_id = :uid"), {"uid": university_id}
+        text("SELECT id FROM courses WHERE university_id = :uid").bindparams(
+            bindparam("uid", type_=Uuid())
+        ),
+        {"uid": university_id},
     )
-    return {row[0] for row in rows}
+    return {_as_uuid(row[0]) for row in rows}
 
 
 async def search(
@@ -1129,6 +1169,7 @@ async def search(
     """
     page_size = normalize_page_size(limit)
     normalized_q = _normalize_text(q) if q else None
+    like_op, year_expr = _like_fragments(db)
 
     params: dict[str, Any] = {}
     expanding: list[str] = []
@@ -1160,15 +1201,18 @@ async def search(
             params["q_cids"] = matched_course_ids
             expanding.append("q_cids")
             clauses.append("r.course_id IN :q_cids")
-        clauses.append(f"rv.title ILIKE :title_like ESCAPE '{_LIKE_ESCAPE}'")
+        clauses.append(f"rv.title {like_op} :title_like ESCAPE '{_LIKE_ESCAPE}'")
         clauses.append(
             "EXISTS (SELECT 1 FROM offering_teachers ot "
             "JOIN teachers t ON t.id = ot.teacher_id "
             "WHERE ot.offering_id = r.offering_id "
-            f"AND t.display_name ILIKE :title_like ESCAPE '{_LIKE_ESCAPE}')"
+            f"AND t.display_name {like_op} :title_like ESCAPE '{_LIKE_ESCAPE}')"
         )
         where.append("(" + " OR ".join(clauses) + ")")
-        rank_expr = f"CASE WHEN rv.title ILIKE :title_like ESCAPE '{_LIKE_ESCAPE}' THEN 0 ELSE 1 END"
+        rank_expr = (
+            f"CASE WHEN rv.title {like_op} :title_like ESCAPE '{_LIKE_ESCAPE}' "
+            "THEN 0 ELSE 1 END"
+        )
     else:
         rank_expr = "1"
 
@@ -1186,7 +1230,7 @@ async def search(
         params["applicable_year"] = applicable_year
         where.append(
             "o.semester_id IN ("
-            "SELECT id FROM semesters WHERE EXTRACT(YEAR FROM start_date) = :applicable_year)"
+            f"SELECT id FROM semesters WHERE {year_expr} = :applicable_year)"
         )
     if teacher_id is not None:
         params["teacher_id"] = teacher_id
@@ -1215,9 +1259,17 @@ async def search(
     from app.modules.access.visibility import visible_resource_ids
 
     # Filter before LIMIT so hidden resources cannot create holes or leak via pagination.
+    # 声明 UUID 参数类型：SQLite 的 DBAPI 不认识 uuid.UUID 对象，Uuid 类型会按方言做
+    # 绑定转换（SQLite → CHAR(32) 字符串，PostgreSQL → 原生 uuid），与 ORM 列行为一致。
+    uuid_params = [bindparam(name, expanding=True, type_=Uuid()) for name in expanding]
+    uuid_params += [
+        bindparam(name, type_=Uuid())
+        for name in ("semester_id", "teacher_id", "cur_course_id", "cur_id")
+        if name in params
+    ]
     stmt = text(sql)
-    if expanding:
-        stmt = stmt.bindparams(*(bindparam(name, expanding=True) for name in expanding))
+    if uuid_params:
+        stmt = stmt.bindparams(*uuid_params)
     source = stmt.columns(id=Uuid(), course_id=Uuid(), resource_type=String(),
                           freshness_status=String(), published_version_id=Uuid(),
                           title=String(), rank=Integer()).subquery()

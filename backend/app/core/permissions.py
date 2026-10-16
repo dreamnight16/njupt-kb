@@ -25,6 +25,7 @@ CORRECTION_HANDLE = "correction.handle"
 COMMENT_MODERATE = "comment.moderate"
 REQUEST_HANDLE = "request.handle"
 CATALOG_MANAGE = "catalog.manage"
+OPS_VIEW = "ops.view"
 USER_SUSPEND = "user.suspend"
 ENTITLEMENT_GRANT = "entitlement.grant"
 AUDIT_VIEW = "audit.view"
@@ -45,6 +46,7 @@ ALL_PERMISSIONS: frozenset[str] = frozenset(
         COMMENT_MODERATE,
         REQUEST_HANDLE,
         CATALOG_MANAGE,
+        OPS_VIEW,
         USER_SUSPEND,
         ENTITLEMENT_GRANT,
         AUDIT_VIEW,

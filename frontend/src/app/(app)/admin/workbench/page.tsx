@@ -52,17 +52,12 @@ function Workbench() {
 
   return (
     <div className="space-y-6">
-      <p className="max-w-2xl text-sm text-text-secondary">
-        工作台只聚合现有模块的待办数量，点击可直接进入对应处理页面。数字为当前快照，
-        处理完成后刷新即可更新。
-      </p>
-
       {!hasPending ? (
         <Notice tone="success" title="当前没有待办">
           待审版本、纠错、投诉、求资料与失败任务均为 0。
         </Notice>
       ) : (
-        <ul className="grid gap-3 sm:grid-cols-2">
+        <ul className="dn-stagger grid gap-3 sm:grid-cols-2">
           {data.items.map((item) => (
             <li key={item.key}>
               <Link

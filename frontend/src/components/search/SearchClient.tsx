@@ -75,9 +75,6 @@ function SearchResults() {
       <header className="bg-cyan px-6 py-8 text-on-color">
         <p className="dn-kicker">SEARCH</p>
         <h1 className="dn-display mt-2 text-3xl">搜索资料</h1>
-        <p className="mt-2 max-w-2xl text-on-color">
-          输入课程名、课程代码、简称、资料标题或教师姓名；也可以直接浏览下方资料。
-        </p>
       </header>
 
       <form
@@ -178,7 +175,7 @@ function SearchResults() {
       ) : (
         <>
           <p className="text-sm text-text-secondary">已显示 {items.length} 条结果</p>
-          <div className="grid gap-4 sm:grid-cols-2">
+          <div className="dn-stagger grid gap-4 sm:grid-cols-2">
             {items.map((item) => (
               <ResourceCard
                 key={item.resource_id}

@@ -54,9 +54,6 @@ function Queue() {
   return (
     <div className="space-y-4">
       <h2 className="dn-display text-2xl">失败通知事件</h2>
-      <p className="text-sm text-text-secondary">
-        重试将事件重新排队，后台处理成功后才生成通知；列表不展示敏感载荷或原始异常。
-      </p>
       {query.error ? (
         <Notice
           tone="warning"

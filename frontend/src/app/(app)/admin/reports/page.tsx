@@ -223,7 +223,7 @@ function ResourceReportsPanel() {
         </ul>
       ) : (
         <Notice tone="info" title="当前没有待处理投诉">
-          新的举报会进入独立工单；未经核实的举报不会直接影响创作者收益。
+          未经核实的举报不会直接影响创作者收益。
         </Notice>
       )}
 

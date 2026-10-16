@@ -172,7 +172,7 @@ async def confirm_payment(db: AsyncSession, *, channel: str, payload: dict) -> P
 - `POST /corrections` 增加可选 `suggested_course_id`、`suggested_resource_type`；仅允许当前公开版本且需有元数据权限。
 - `POST /admin/corrections/{id}/classification`：`expected_revision`、`resolution_note`；需要 `catalog.manage` 与 `correction.handle`。事务内调用 `content.service.correct_classification` 校验公开版本与修订号，更正资源分类，随后标记工单已修复并通知。过期快照返回 409。
 - `GET/PATCH /me` 增加可选 `gender`、`bio`。头像使用不带账号密码的 HTTPS 地址，现有 `avatar_url` 继续可清空；新增字段仅通过本人接口返回。
-- `POST /me/avatar`：`multipart/form-data` 单文件字段 `file`，仅接受 PNG/JPEG/WebP 且不超过 `AVATAR_MAX_SIZE_BYTES`（默认 2 MiB）。按真实字节用 Pillow 校验格式，写入公开桶 `S3_BUCKET_PUBLIC` 并返回更新后的 `MeResponse`；地址由 `S3_PUBLIC_BASE_URL`（留空时回退 `S3_PUBLIC_ENDPOINT_URL` + 桶名）拼装。头像不走隔离区扫描，也不能用它替代资料文件上传。
+- `POST /me/avatar`：`multipart/form-data` 单文件字段 `file`，接受 PNG/JPEG/WebP/GIF 且不超过 `AVATAR_MAX_SIZE_BYTES`（默认 2 MiB）。`image/jpg`、`image/pjpeg`、`image/x-png` 等浏览器非标准 MIME 先归一再校验，避免 Windows 下 .jpg 被误拒。按真实字节用 Pillow 校验格式，写入公开桶 `S3_BUCKET_PUBLIC` 并返回更新后的 `MeResponse`；地址由 `S3_PUBLIC_BASE_URL`（留空时回退 `S3_PUBLIC_ENDPOINT_URL` + 桶名）拼装。头像不走隔离区扫描，也不能用它替代资料文件上传。
 
 ## beta6 共建与质量扩展
 
@@ -215,6 +215,20 @@ async def confirm_payment(db: AsyncSession, *, channel: str, payload: dict) -> P
 - `GET /admin/comments`：`comment.moderate` 权限，`hidden_only / cursor / limit`，仅已发布资料的评论；隐藏/撤回正文仍为 null，具体操作复用资料页。
 - 通知客户端按真实 `is_read` 字段读取；既有 `POST /notifications/read-all` 与单条已读接口补齐界面。需求、候选、通知、关注、本人需求补分页，新增 `/requests/{id}`、`/admin/comments`、`/admin/events` 页面。
 - `0004_beta9` 增加需求处理字段、候选表和事件类型约束。升级前备份；回退不静默删除新事件，旧事件约束不接受新类型时拒绝回退。AI、商业化与解决贡献奖励未启用。
+
+## beta10 账号注销、目录运营与互动治理
+
+- `POST /me/deletion`：`{password, confirm}`。`confirm` 必须等于固定确认词「注销账号」；校验当前密码后**立即注销**：`users.status=deleted`、写入 `deleted_at`、匿名化个人资料（昵称改为「已注销用户」，头像/简介/性别/学院/专业/入学年份/偏好清空）、撤销全部会话。上传资源、评论、评分、审计与事件记录一律保留；评论不做匿名化，作者显示名随资料匿名化变为「已注销用户」。密码错误返回 403 并记审计（不记密码）；重复注销返回 409 `ACCOUNT_ALREADY_DELETED`。已注销账号被 `get_current_user` 拒绝（403），因此不可再登录或调用本人接口。
+- `GET /me/export`：返回本人数据 JSON 附件（`Content-Disposition`，文件名 `njupt-kb-export-<date>.json`）。含账号、资料、关注、收藏、评分、本人评论（带撤回/隐藏标记）、本人上传清单（标题/类型/状态/时间，**不含文件字节与签名 URL**）、通知、本人需求与候选回应、本人会话。不含他人数据。注销后不可导出。
+- 保留策略：`identity/service.py` 的 `ACCOUNT_RETENTION_DAYS = 30`。注销立即生效，邮箱与审计/业务事实按保留期保留供申诉与对账，期满由运维清理；**本轮不实现自动清理任务**。迁移 `0005_beta10_account` 仅新增 `users.deleted_at`。
+- 目录维护（`catalog.manage`）：`GET/POST /admin/catalog/{entity_type}`、`PATCH /admin/catalog/{entity_type}/{item_id}`（改名）、`POST /admin/catalog/{entity_type}/{item_id}/deactivate`（软停用）、`GET /admin/catalog/{entity_type}/merge-impact?source_id&target_id`、`POST /admin/catalog/{entity_type}/merge`。`entity_type ∈ university | college | major | course | teacher | semester`。停用项不再进入前台选择器与检索，已关联资料仍可正常读取；合并先返回影响面再执行。变更写审计，不物理删除。
+- `GET /admin/workbench`：新增权限 `ops.view`（仅管理员，不自动授予资料审核员）。只读聚合待审资料版本、未处理纠错、未处理投诉/举报、开放中求资料需求、失败事件与任务的数量与跳转地址；每条指标一条 COUNT，无逐条查询、无缓存、无定时任务。
+- `0006_beta10_ops` 新增 `teachers.status`、`semesters.status`（`active/inactive/merged`），并扩展 `courses.status` 的 CHECK 增加 `inactive`。**不新增 domain event 类型**，不改 `ck_domain_events_event_type`。
+- 规则推荐保留**固定探索槽位**（常量集中在 `interaction/recommendations.py` 顶部，均为待确认的默认值）：`limit>=4` 时启用、占 1 个槽位、插在第 3 条、候选为 `created_at` 30 天内且评价数 <3 的新内容、理由「新内容，供探索」；无合格候选时不占位。`RecommendationItem` 增加 `explore: bool`。探索项仍走同一套可见性/发布/审核/时效过滤，只改变排序位置。
+- `POST /reports/comments`：`{resource_id, comment_id, reason}`，登录 + active 账号即可（不需新权限），理由 1–500 字；不能举报自己的评论；同一用户对同一评论至多一条未处理举报（`0007_beta10_interaction` 建局部唯一索引）。**复用 `report.created` / `report.resolved`，不新增 event_type。**
+- `GET /admin/comment-reports`（游标分页）与 `POST /admin/comment-reports/{report_id}/decision`：`{action: accept|dismiss|resolve, reason, expected_revision, comment_revision?}`，需 `report.handle`。`resolve` 复用 beta8 的评论隐藏能力，隐藏与工单流转在同一事务内完成，不重复实现一套隐藏逻辑。
+- `POST /comment-appeals`：`{resource_id, comment_id, reason}`，被隐藏评论的作者提交**一次**申诉（`uq_comment_appeals_comment`）；已撤回评论不可申诉。`GET /admin/comment-appeals` 与 `POST /admin/comment-appeals/{appeal_id}/decision`：`{decision: accept|reject, reason, expected_revision, comment_revision?}`，需 `report.handle`，采纳即恢复评论。
+- 评论列表在作者本人与具备评论管理权限者视角额外返回 `moderation_reason`（管理员隐藏时给出的处理理由，只读自审计，不复制正文）；理由不对普通读者公开。
 
 ## ai
 

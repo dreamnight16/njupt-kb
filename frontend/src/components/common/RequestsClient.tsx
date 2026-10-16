@@ -78,10 +78,6 @@ export function RequestsClient({ initialCourse, initialOpen }: {
       <header className="bg-amber px-6 py-8 text-on-color">
         <p className="dn-kicker">RESOURCE REQUESTS</p>
         <h1 className="dn-display mt-2 text-3xl">求资料</h1>
-        <p className="mt-3 max-w-2xl text-sm text-on-color">
-          没找到的资料可以在这里提出需求；关注同一需求的人会合并计数，避免重复建单。
-          上传发布后可以提交为候选，由发起者或管理员核对并确认解决。
-        </p>
       </header>
 
       <div className="flex flex-wrap items-center justify-between gap-3">
@@ -197,7 +193,7 @@ export function RequestsClient({ initialCourse, initialOpen }: {
           title={statusFilter === 'open' ? '当前没有进行中的需求' : '还没有资料需求'}
           description={
             statusFilter === 'open'
-              ? '你可以提出新的资料需求，或先浏览课程寻找现有资料。'
+              ? '可先浏览课程寻找现有资料。'
               : '切换到「寻找中」查看进行中的需求。'
           }
         />

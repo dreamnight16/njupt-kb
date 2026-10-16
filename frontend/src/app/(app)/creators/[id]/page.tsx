@@ -117,7 +117,6 @@ export default async function CreatorProfilePage({
         ) : (
           <div className="mt-3">
             <Notice tone="info" title="还没有可展示的贡献记录">
-              资料通过审核、修订被采纳或纠错被采纳后会记为贡献（§24.1）。
             </Notice>
           </div>
         )}
@@ -145,9 +144,7 @@ export default async function CreatorProfilePage({
               ))}
             </div>
           ) : (
-            <Notice tone="info" title="还没有公开资料">
-              只有通过审核并发布的资料会出现在这里；未公开或不对外可见的资料不会显示。
-            </Notice>
+            <Notice tone="info" title="还没有公开资料" />
           )}
         </div>
       </section>

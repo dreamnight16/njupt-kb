@@ -164,7 +164,7 @@ export default async function CourseDetailPage({
               {resourcesResult.error.message}
             </Notice>
           ) : resourcesResult.data && resourcesResult.data.items.length > 0 ? (
-            <div className="grid gap-4 sm:grid-cols-2">
+            <div className="dn-stagger grid gap-4 sm:grid-cols-2">
               {resourcesResult.data.items.map((item) => (
                 <ResourceCard
                   key={item.id}
@@ -180,8 +180,8 @@ export default async function CourseDetailPage({
           ) : (
             <Notice tone="info" title={typeFilter ? '该类型下还没有资料' : '该课程还没有已发布的资料'}>
               {typeFilter
-                ? '可以切换到其他类型，或查看全部类型。'
-                : '已发布资料通过审核后才会显示；你也可以在登录后为这门课上传资料。'}
+                ? '切换到其他类型看看。'
+                : '登录后可为这门课上传资料。'}
             </Notice>
           )}
         </div>
@@ -238,7 +238,6 @@ export default async function CourseDetailPage({
               </div>
             ) : (
               <Notice tone="info" title="暂未记录该课程的培养方案归属">
-                课程可能属于公共课或尚未完成目录维护；资料仍按课程本身关联。
               </Notice>
             )}
           </section>

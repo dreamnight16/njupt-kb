@@ -658,10 +658,21 @@ async def update_me(
 
 
 # 声明类型 -> (Pillow 格式名, 存储后缀)。头像直传公开桶，不进入隔离区扫描（§14.2、§43）。
+# MIME 归一：Windows 的文件选择器/浏览器常把 JPEG 报成 image/jpg 或 image/pjpeg，
+# 旧工具也会报 image/x-png，这里按别名收敛后再与真实字节比对，避免误拒正常头像。
 _AVATAR_FORMATS = {
     "image/png": ("PNG", ".png"),
+    "image/x-png": ("PNG", ".png"),
     "image/jpeg": ("JPEG", ".jpg"),
+    "image/jpg": ("JPEG", ".jpg"),
+    "image/pjpeg": ("JPEG", ".jpg"),
     "image/webp": ("WEBP", ".webp"),
+    "image/gif": ("GIF", ".gif"),
+}
+_AVATAR_MIME_ALIASES = {
+    "image/jpg": "image/jpeg",
+    "image/pjpeg": "image/jpeg",
+    "image/x-png": "image/png",
 }
 
 
@@ -676,9 +687,10 @@ async def update_avatar(
     from app.core.storage import build_storage_key, storage
 
     mime = (content_type or "").split(";")[0].strip().lower()
+    mime = _AVATAR_MIME_ALIASES.get(mime, mime)
     spec = _AVATAR_FORMATS.get(mime)
     if spec is None:
-        raise InvalidInput("头像仅支持 PNG、JPEG 或 WebP")
+        raise InvalidInput("头像仅支持 PNG、JPEG、WebP 或 GIF")
     if not data:
         raise InvalidInput("头像文件为空")
     if len(data) > settings.AVATAR_MAX_SIZE_BYTES:
