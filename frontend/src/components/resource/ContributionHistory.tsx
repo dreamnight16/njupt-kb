@@ -85,6 +85,11 @@ export function ContributionHistory() {
                     状态：{item.status} · {item.follower_count} 人关注 · 发布于{' '}
                     {formatDateTime(item.created_at)}
                   </p>
+                  {item.status === 'fulfilled' && !item.resolved_resource_accessible && (
+                    <p className="mt-1 text-xs text-text-secondary">
+                      原解决资料当前不可访问，可复核后重新打开。
+                    </p>
+                  )}
                 </li>
               ))}
             </ul>{requestsQuery.hasNextPage && <Button onClick={()=>requestsQuery.fetchNextPage()} isLoading={requestsQuery.isFetchingNextPage}>更多我的需求</Button>}</>
