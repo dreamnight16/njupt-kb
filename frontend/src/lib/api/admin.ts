@@ -233,3 +233,145 @@ export async function setAccessPolicy(
   );
   return data;
 }
+
+// --- 运营任务工作台（backend/app/modules/ops/router.py）---
+
+export interface WorkbenchItem {
+  key: string;
+  label: string;
+  count: number;
+  href: string;
+}
+
+export interface WorkbenchOut {
+  items: WorkbenchItem[];
+  total: number;
+  generated_at: string;
+}
+
+export async function getWorkbench(): Promise<WorkbenchOut> {
+  const { data } = await api.get<WorkbenchOut>('/admin/workbench');
+  return data;
+}
+
+// --- 管理员目录维护（backend/app/modules/catalog/router.py）---
+
+export type CatalogEntityType =
+  | 'university'
+  | 'college'
+  | 'major'
+  | 'course'
+  | 'teacher'
+  | 'semester';
+
+export interface CatalogItem {
+  id: string;
+  name: string;
+  status: string;
+  code: string | null;
+  short_name: string | null;
+  parent_id: string | null;
+  parent_name: string | null;
+  academic_year: string | null;
+  season: string | null;
+}
+
+export interface CatalogCreateIn {
+  name: string;
+  code?: string | null;
+  short_name?: string | null;
+  slug?: string | null;
+  university_id?: string | null;
+  college_id?: string | null;
+  description?: string | null;
+  academic_year?: string | null;
+  season?: string | null;
+}
+
+export interface CatalogReferenceCount {
+  table: string;
+  column: string;
+  label: string;
+  count: number;
+}
+
+export interface CatalogMergeImpact {
+  entity_type: string;
+  source_id: string;
+  target_id: string;
+  source_name: string;
+  target_name: string;
+  references: CatalogReferenceCount[];
+  total: number;
+}
+
+export async function listCatalog(
+  entityType: CatalogEntityType,
+  params: { q?: string; status?: string } = {},
+): Promise<CatalogItem[]> {
+  const { data } = await api.get<CatalogItem[]>(`/admin/catalog/${entityType}`, {
+    params: { q: params.q || undefined, status: params.status || undefined },
+  });
+  return data;
+}
+
+export async function createCatalog(
+  entityType: CatalogEntityType,
+  payload: CatalogCreateIn,
+): Promise<CatalogItem> {
+  const { data } = await api.post<CatalogItem>(
+    `/admin/catalog/${entityType}`,
+    payload,
+  );
+  return data;
+}
+
+export async function renameCatalog(
+  entityType: CatalogEntityType,
+  itemId: string,
+  name: string,
+  reason?: string,
+): Promise<CatalogItem> {
+  const { data } = await api.patch<CatalogItem>(
+    `/admin/catalog/${entityType}/${itemId}`,
+    { name, reason: reason ?? null },
+  );
+  return data;
+}
+
+export async function deactivateCatalog(
+  entityType: CatalogEntityType,
+  itemId: string,
+  reason?: string,
+): Promise<CatalogItem> {
+  const { data } = await api.post<CatalogItem>(
+    `/admin/catalog/${entityType}/${itemId}/deactivate`,
+    { reason: reason ?? null },
+  );
+  return data;
+}
+
+export async function getCatalogMergeImpact(
+  entityType: CatalogEntityType,
+  sourceId: string,
+  targetId: string,
+): Promise<CatalogMergeImpact> {
+  const { data } = await api.get<CatalogMergeImpact>(
+    `/admin/catalog/${entityType}/merge-impact`,
+    { params: { source_id: sourceId, target_id: targetId } },
+  );
+  return data;
+}
+
+export async function mergeCatalog(
+  entityType: CatalogEntityType,
+  sourceId: string,
+  targetId: string,
+  reason: string,
+): Promise<CatalogMergeImpact> {
+  const { data } = await api.post<CatalogMergeImpact>(
+    `/admin/catalog/${entityType}/merge`,
+    { source_id: sourceId, target_id: targetId, reason },
+  );
+  return data;
+}
