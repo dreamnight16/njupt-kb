@@ -100,6 +100,39 @@ class Settings(BaseSettings):
     LIBREOFFICE_BIN: str = "soffice"
     DERIVATIVE_TIMEOUT_SECONDS: int = 180
 
+    # --- beta11 第一页图片预览与用户水印（prevew.md）---
+    # 图片预览默认只渲染第一页：浏览器拿到的是 page1.webp，不是完整 PDF（prevew.md 五）。
+    PREVIEW_IMAGE_ENABLED: bool = True
+    PREVIEW_IMAGE_WIDTH: int = 1200
+    PREVIEW_IMAGE_QUALITY: int = 82
+    # 水印低可见度但可追溯：斜向重复「用户短码 + 日期」，不用破坏阅读的大水印（prevew.md 十二）。
+    PREVIEW_WATERMARK_ENABLED: bool = True
+    PREVIEW_WATERMARK_OPACITY: int = 28  # 0-255，Alpha 通道
+
+    # --- beta11 API 分级限流（pachong.md 三、四）---
+    # 第一层规则，按角色分级、可调，不写死；subject 优先取登录用户，其次会话，最后 IP，
+    # 避免校园网同一公网 IP 下互相挤占（pachong.md 四）。0 表示不限制。
+    RATE_LIMIT_ENABLED: bool = True
+    RATE_LIMIT_WINDOW_SECONDS: int = 60
+    RATE_LIMIT_SEARCH: dict[str, int] = {
+        "anon": 30, "user": 60, "contributor": 60, "reviewer": 60, "admin": 120,
+    }
+    RATE_LIMIT_BROWSE: dict[str, int] = {
+        "anon": 60, "user": 120, "contributor": 120, "reviewer": 120, "admin": 240,
+    }
+    RATE_LIMIT_RESOURCE: dict[str, int] = {
+        "anon": 60, "user": 120, "contributor": 120, "reviewer": 120, "admin": 240,
+    }
+    RATE_LIMIT_DOWNLOAD: dict[str, int] = {
+        "anon": 5, "user": 10, "contributor": 20, "reviewer": 30, "admin": 60,
+    }
+    RATE_LIMIT_UPLOAD: dict[str, int] = {
+        "anon": 0, "user": 5, "contributor": 20, "reviewer": 30, "admin": 60,
+    }
+    RATE_LIMIT_LOGIN: dict[str, int] = {
+        "anon": 5, "user": 5, "contributor": 5, "reviewer": 5, "admin": 5,
+    }
+
     # --- 邮件（§21：仅用于验证与找回密码）---
     MAIL_ENABLED: bool = False
     MAIL_FROM: str = "no-reply@example.com"
