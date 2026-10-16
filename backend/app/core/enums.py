@@ -253,6 +253,9 @@ class CourseStatus(StrEnum):
     DEPRECATED = "deprecated"
     MERGED = "merged"
     PENDING_CLASSIFICATION = "pending_classification"
+    # beta10：管理员软停用课程。停用后不再进入前台选择器与检索，
+    # 但已关联资料仍按既有权限读取（不物理删除、不连带撤下）。
+    INACTIVE = "inactive"
 
 
 class CatalogEntityStatus(StrEnum):

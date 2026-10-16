@@ -113,6 +113,7 @@ from app.modules.interaction.router import router as interaction_router  # noqa:
 from app.modules.jobs.router import router as jobs_router  # noqa: E402
 from app.modules.moderation.router import router as moderation_router  # noqa: E402
 from app.modules.notification.router import router as notification_router  # noqa: E402
+from app.modules.ops.router import router as ops_router  # noqa: E402
 from app.modules.topics.router import router as topics_router  # noqa: E402
 
 for _router in (
@@ -128,5 +129,6 @@ for _router in (
     creator_router,
     ai_router,
     topics_router,
+    ops_router,
 ):
     app.include_router(_router, prefix=settings.API_PREFIX)
