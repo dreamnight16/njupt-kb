@@ -61,6 +61,9 @@ class User(Base, UUIDPrimaryKey, Timestamped):
     email_verified_at: Mapped[datetime | None] = mapped_column(
         DateTime(timezone=True), nullable=True
     )
+    # 注销时刻。注销立即生效（不可登录、公开资料匿名化）；邮箱与审计/业务事实
+    # 按保留期继续保留，供申诉与对账，期满由运维清理（§9「注销账号」）。
+    deleted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
     # selectin 预加载：display_name_of(user) 与 /me 需要在不触发异步懒加载的前提下读取档案。
     profile: Mapped["UserProfile | None"] = relationship(

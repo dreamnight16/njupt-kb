@@ -117,3 +117,11 @@ class SessionItem(BaseModel):
     user_agent: str | None = None
     client_ip: str | None = None
     current: bool = False
+
+
+class DeletionRequest(BaseModel):
+    """注销账号请求（§9）。确认词是否匹配由 service 判定，避免误触。"""
+
+    password: str
+    confirm: str = Field(min_length=1, max_length=40)
+

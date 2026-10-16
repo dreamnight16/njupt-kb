@@ -6,7 +6,10 @@
 
 from __future__ import annotations
 
+from datetime import date
+
 from fastapi import APIRouter, Depends, File, Query, Request, Response, UploadFile, status
+from fastapi.responses import JSONResponse
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import settings
@@ -25,6 +28,7 @@ from app.modules.identity.models import Session, User
 from app.modules.identity.schemas import (
     ActionMessage,
     CsrfResponse,
+    DeletionRequest,
     EmailVerificationConfirmRequest,
     EmailVerificationRequest,
     LoginRequest,
@@ -263,3 +267,37 @@ async def revoke_session(
         db, user_id=user.id, session_id=parsed, request_id=request_id
     )
     return Response(status_code=status.HTTP_204_NO_CONTENT)
+
+
+@router.post("/me/deletion", response_model=ActionMessage)
+async def delete_account(
+    payload: DeletionRequest,
+    response: Response,
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+    request_id: str = Depends(get_request_id),
+) -> ActionMessage:
+    """注销账号：匿名化资料并撤销全部会话，业务事实保留（§9）。"""
+    result = await service.delete_account(
+        db,
+        user=user,
+        password=payload.password,
+        confirm=payload.confirm,
+        request_id=request_id,
+    )
+    _clear_session_cookie(response)
+    return result
+
+
+@router.get("/me/export")
+async def export_my_data(
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> JSONResponse:
+    """导出本人数据为 JSON 附件（§9）：不含文件字节、签名 URL 与他人数据。"""
+    payload = await service.export_my_data(db, user=user)
+    filename = f"njupt-kb-export-{date.today().isoformat()}.json"
+    return JSONResponse(
+        content=payload,
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+    )
