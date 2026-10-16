@@ -41,7 +41,13 @@ export default function AdminReviewsPage() {
       });
     },
     onSuccess: (_result, variables) => {
-      toast.success(variables.decision === 'approve' ? '已批准' : '已驳回');
+      const message =
+        variables.decision === 'approve'
+          ? '已批准'
+          : variables.decision === 'needs_info'
+            ? '已要求补充材料'
+            : '已驳回';
+      toast.success(message);
       setActive(null);
       setReason('');
       setConfirmReject(false);
@@ -204,6 +210,14 @@ export default function AdminReviewsPage() {
                   disabled={!reason.trim()}
                 >
                   驳回
+                </Button>
+                <Button
+                  variant="ghost"
+                  onClick={() => decisionMutation.mutate({ decision: 'needs_info' })}
+                  isLoading={decisionMutation.isPending}
+                  disabled={!reason.trim()}
+                >
+                  要求补证
                 </Button>
                 <Button
                   variant="primary"

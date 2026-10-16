@@ -34,6 +34,9 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
             <Link href="/terms" className="underline underline-offset-2 hover:text-text-primary">
               服务条款
             </Link>
+            <Link href="/rights-notice" className="underline underline-offset-2 hover:text-text-primary">
+              侵权通知
+            </Link>
             <Link href="/copyright" className="underline underline-offset-2 hover:text-text-primary">
               版权与侵权投诉
             </Link>

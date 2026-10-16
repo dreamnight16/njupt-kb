@@ -15,7 +15,13 @@ from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import settings
+from app.core.errors import NotEnabled
 from app.modules.ops.schemas import (
+    CacheStatsOut,
+    DbPoolBudgetOut,
+    EventBacklogOut,
+    JobBacklogOut,
+    MetricsOut,
     OpsAlertOut,
     OpsAlertsOut,
     SecurityLoginFailureItem,
@@ -313,4 +319,38 @@ async def security_overview(db: AsyncSession) -> SecurityOverviewOut:
         new_ip_logins=new_ip_logins,
         download_velocity_flagged_last_7d=velocity_count,
         generated_at=now,
+    )
+
+
+async def metrics_summary(db: AsyncSession) -> MetricsOut:
+    """只读 SLO 指标聚合（高并发专项 §13）：连接池预算、缓存、事件/任务积压与慢查询阈值。
+
+    只读聚合，不写库、不加缓存、不自动处置；``OPS_METRICS_ENABLED=False`` 时显式不可用，
+    不返回假成功（§25.2）。事件计数复用 notification.reconcile_events，避免口径漂移。
+    """
+    if not settings.OPS_METRICS_ENABLED:
+        raise NotEnabled("指标端点未启用")
+
+    from app.core.cache import stats as cache_stats
+    from app.core.enums import JobStatus
+    from app.modules.jobs.models import Job
+    from app.modules.notification.reconcile import reconcile_events
+
+    events = await reconcile_events(db)
+    job_counts = {
+        status.value: await _count(db, Job, Job.status == status.value)
+        for status in JobStatus
+    }
+
+    return MetricsOut(
+        db_pool=DbPoolBudgetOut(
+            pool_size=settings.DB_POOL_SIZE,
+            max_overflow=settings.DB_MAX_OVERFLOW,
+            pool_timeout_seconds=settings.DB_POOL_TIMEOUT_SECONDS,
+        ),
+        cache=CacheStatsOut(**cache_stats()),
+        events=EventBacklogOut(**events),
+        jobs=JobBacklogOut(**job_counts, total=sum(job_counts.values())),
+        slow_query_ms=settings.SLOW_QUERY_MS,
+        generated_at=datetime.now(timezone.utc),
     )

@@ -3,6 +3,7 @@
 前缀由 app/main.py 统一加 /api/v1，模块不自行决定前缀（docs/ARCHITECTURE.md §1）。
 只读接口（贡献者资料、我的贡献、我的账本）不涉及资金，任何阶段都可用；
 写接口（提现、结算）在 `COMMERCE_ENABLED=false` 或规则未配置时抛 NotEnabled（§25.2）。
+贡献者入驻（§3.4）：普通用户登录即可申请；后台审批需 `contributor.review`。
 """
 
 from __future__ import annotations
@@ -13,11 +14,15 @@ from fastapi import APIRouter, Depends, Header, Query, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.deps import get_current_user, get_db, get_request_id
+from app.core.enums import ContributorOnboardingStatus
 from app.core.pagination import CursorPage
-from app.core.permissions import SETTLEMENT_MANAGE, require
+from app.core.permissions import CONTRIBUTOR_REVIEW, SETTLEMENT_MANAGE, require
 from app.modules.creator import service
 from app.modules.creator.schemas import (
     ContributionOut,
+    ContributorApplicationCreate,
+    ContributorApplicationDecisionIn,
+    ContributorApplicationOut,
     CreatorLedgerEntryOut,
     CreatorProfileOut,
     CreatorProfileUpdate,
@@ -59,6 +64,81 @@ async def update_my_creator_profile(
     return await service.update_creator_profile(
         db, user=user, payload=body.model_dump(exclude_unset=True), request_id=request_id
     )
+
+
+@router.post(
+    "/me/contributor-applications",
+    response_model=ContributorApplicationOut,
+    status_code=status.HTTP_201_CREATED,
+)
+async def submit_contributor_application(
+    body: ContributorApplicationCreate,
+    user=Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+    request_id: str = Depends(get_request_id),
+) -> ContributorApplicationOut:
+    """提交专业贡献者入驻申请（登录即可，普通用户可直接投稿免费内容）。"""
+    application = await service.submit_application(
+        db, user=user, payload=body, request_id=request_id
+    )
+    return ContributorApplicationOut.model_validate(application)
+
+
+@router.get(
+    "/me/contributor-applications", response_model=CursorPage[ContributorApplicationOut]
+)
+async def list_my_contributor_applications(
+    limit: int | None = Query(default=None, ge=1, le=100),
+    cursor: str | None = Query(default=None),
+    user=Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> CursorPage[ContributorApplicationOut]:
+    """本人入驻申请（只读，游标分页）。"""
+    return await service.list_my_applications(
+        db, user_id=user.id, limit=limit, cursor=cursor
+    )
+
+
+@router.get(
+    "/admin/contributor-applications", response_model=CursorPage[ContributorApplicationOut]
+)
+async def list_contributor_applications(
+    application_status: list[ContributorOnboardingStatus] | None = Query(
+        default=None, alias="status"
+    ),
+    limit: int | None = Query(default=None, ge=1, le=100),
+    cursor: str | None = Query(default=None),
+    user=Depends(require(CONTRIBUTOR_REVIEW)),
+    db: AsyncSession = Depends(get_db),
+) -> CursorPage[ContributorApplicationOut]:
+    """后台入驻申请队列（需 contributor.review，可按状态过滤）。"""
+    return await service.list_applications(
+        db, statuses=application_status, limit=limit, cursor=cursor
+    )
+
+
+@router.post(
+    "/admin/contributor-applications/{application_id}/decisions",
+    response_model=ContributorApplicationOut,
+    status_code=status.HTTP_201_CREATED,
+)
+async def decide_contributor_application(
+    application_id: uuid.UUID,
+    body: ContributorApplicationDecisionIn,
+    user=Depends(require(CONTRIBUTOR_REVIEW)),
+    db: AsyncSession = Depends(get_db),
+    request_id: str = Depends(get_request_id),
+) -> ContributorApplicationOut:
+    """审核入驻申请：受理（under_review）、通过（active）、拒绝（rejected）。"""
+    application = await service.decide_application(
+        db,
+        application_id=application_id,
+        actor=user,
+        decision=body.decision,
+        reason=body.reason,
+        request_id=request_id,
+    )
+    return ContributorApplicationOut.model_validate(application)
 
 
 @router.get("/me/contributions", response_model=CursorPage[ContributionOut])

@@ -60,8 +60,9 @@ class ReviewOut(_ORMModel):
 
 
 class ReviewDecisionIn(BaseModel):
+    # 决定取值：approve / needs_info（补证）/ reject，见 ModerationDecisionType。
     decision: ModerationDecisionType
-    # 审核员必须给出明确结论和理由（§13.2）。
+    # 审核员必须给出明确结论和理由（§13.2）；补证与拒绝都须说明依据。
     reason: str = Field(min_length=1, max_length=2000)
     # 审核员所查看快照的标识；与当前快照不一致时返回冲突（§13.3）。
     snapshot_revision: int = Field(ge=1)

@@ -108,6 +108,8 @@ app.include_router(health_router, prefix=settings.API_PREFIX)
 # --- 业务模块路由（顺序与 docs/ARCHITECTURE.md 一致）---
 from app.modules.access.router import router as access_router  # noqa: E402
 from app.modules.ai.router import router as ai_router  # noqa: E402
+from app.modules.assignment.router import router as assignment_router  # noqa: E402
+from app.modules.cases.router import router as cases_router  # noqa: E402
 from app.modules.catalog.router import router as catalog_router  # noqa: E402
 from app.modules.commerce.router import router as commerce_router  # noqa: E402
 from app.modules.content.router import router as content_router  # noqa: E402
@@ -115,9 +117,11 @@ from app.modules.creator.router import router as creator_router  # noqa: E402
 from app.modules.identity.router import router as identity_router  # noqa: E402
 from app.modules.interaction.router import router as interaction_router  # noqa: E402
 from app.modules.jobs.router import router as jobs_router  # noqa: E402
+from app.modules.licensing.router import router as licensing_router  # noqa: E402
 from app.modules.moderation.router import router as moderation_router  # noqa: E402
 from app.modules.notification.router import router as notification_router  # noqa: E402
 from app.modules.ops.router import router as ops_router  # noqa: E402
+from app.modules.settlement.router import router as settlement_router  # noqa: E402
 from app.modules.topics.router import router as topics_router  # noqa: E402
 
 for _router in (
@@ -130,9 +134,13 @@ for _router in (
     notification_router,
     jobs_router,
     commerce_router,
+    licensing_router,
     creator_router,
+    assignment_router,
+    cases_router,
     ai_router,
     topics_router,
     ops_router,
+    settlement_router,
 ):
     app.include_router(_router, prefix=settings.API_PREFIX)

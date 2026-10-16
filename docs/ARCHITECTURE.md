@@ -50,6 +50,10 @@ nginx/nginx.conf               [冻结]
 | jobs | `app/modules/jobs` | `/admin/jobs` |
 | commerce | `app/modules/commerce` | `/orders`、`/admin/refunds`、`/admin/reconciliations` |
 | creator | `app/modules/creator` | `/creators`、`/me/contributions`、`/me/ledger`、`/me/withdrawals` |
+| assignment | `app/modules/assignment` | `/admin/permission-assignments`、`/admin/resource-assignments`、`/me/assignments`（beta15） |
+| cases | `app/modules/cases` | `/cases`、`/me/cases`、`/rights-notices`、`/admin/cases`（beta15） |
+| licensing | `app/modules/licensing` | `/me/agreements`、`/agreements`、`/price-proposals`、`/admin/agreements`（beta15，商业化关闭） |
+| settlement | `app/modules/settlement` | `/me/settlement-statements`、`/admin/settlement-statements`、`/admin/payouts`（beta15，商业化关闭） |
 | ai | `app/modules/ai` | `/ai` |
 
 `main.py` 按固定顺序 `from app.modules.<name>.router import router as <name>_router` 并 `include_router(router, prefix="/api/v1")`。

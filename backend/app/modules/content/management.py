@@ -28,20 +28,42 @@ from app.modules.content.schemas import (
 )
 
 
-async def _assert_workspace_access(db, user, resource, version=None):
-    if resource.owner_id == user.id:
-        return
+async def _assert_workspace_access(db, user, resource, version=None) -> bool:
+    """工作台访问判定，返回「本人可管理」（owner 或明确分配）。
+
+    `owner` 判定之外只**追加**分配判定，不改变既有审核语义：审核仍由
+    `can_review`（即 `RESOURCE_REVIEW`）决定（§3.3）。
+    """
+    from app.core.enums import AssignmentCapability
+    from app.modules.assignment.service import can_manage_resource
+
+    if await can_manage_resource(db, user, resource.id, AssignmentCapability.MAINTAIN):
+        return True
     if service._is_manager(user):
         from app.modules.moderation.service import can_review
 
         if version is None or await can_review(db, user, version.id):
-            return
+            return False
     raise NotFound("资料不存在")
 
 
 async def list_my_resources(db: AsyncSession, *, user, cursor=None, limit=None):
+    from app.core.enums import AssignmentCapability
+    from app.modules.assignment.service import (
+        active_assignment_course_ids,
+        active_assignment_resource_ids,
+    )
+
     size = normalize_page_size(limit)
-    stmt = select(Resource).where(Resource.owner_id == user.id)
+    # 列表与详情、版本、导出使用同一作用域过滤（§3.3）：本人所有 + 明确分配。
+    scope = [Resource.owner_id == user.id]
+    assigned = await active_assignment_resource_ids(db, user, AssignmentCapability.MAINTAIN)
+    if assigned:
+        scope.append(Resource.id.in_(assigned))
+    assigned_courses = await active_assignment_course_ids(db, user, AssignmentCapability.MAINTAIN)
+    if assigned_courses:
+        scope.append(Resource.course_id.in_(assigned_courses))
+    stmt = select(Resource).where(or_(*scope))
     if cursor:
         data = decode_cursor(cursor)
         try:
@@ -110,7 +132,7 @@ async def list_my_resources(db: AsyncSession, *, user, cursor=None, limit=None):
 
 async def list_versions(db: AsyncSession, *, user, resource_id: uuid.UUID):
     resource = await service.get_resource(db, resource_id)
-    await _assert_workspace_access(db, user, resource)
+    manages = await _assert_workspace_access(db, user, resource)
     versions = (
         await db.execute(
             select(ResourceVersion)
@@ -122,7 +144,7 @@ async def list_versions(db: AsyncSession, *, user, resource_id: uuid.UUID):
 
     result = []
     for version in versions:
-        if resource.owner_id == user.id or await can_review(db, user, version.id):
+        if manages or await can_review(db, user, version.id):
             result.append(service._version_out(version))
     if not result:
         raise NotFound("资料不存在")
@@ -136,7 +158,7 @@ async def get_version_detail(
     version = await service.get_version(db, version_id)
     if version.resource_id != resource.id:
         raise NotFound("版本不存在")
-    await _assert_workspace_access(db, user, resource, version)
+    manages = await _assert_workspace_access(db, user, resource, version)
     rights = await db.scalar(
         select(RightsDeclaration).where(RightsDeclaration.version_id == version_id)
     )
@@ -173,5 +195,5 @@ async def get_version_detail(
         else None,
         tags=tags,
         review_reason=await latest_decision_reason(db, version_id),
-        can_edit=resource.owner_id == user.id,
+        can_edit=manages,
     )

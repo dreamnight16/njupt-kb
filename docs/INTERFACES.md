@@ -298,3 +298,94 @@ async def process_result(db: AsyncSession, process_id: uuid.UUID) -> AIProcess
 `update_correction_status` 只在业务事务内写 `CORRECTION_RESOLVED` 事件；worker 消费才生成站内通知，不再同步重复写通知。事件载荷保留发生时的处理人，通知重试按事件去重，`open` 状态不产生结果通知。
 
 配置：`SESSION_MAX_ACTIVE_PER_USER=5`（0 不限），`DOWNLOAD_VELOCITY_WINDOW_SECONDS=300`、`DOWNLOAD_VELOCITY_WINDOW_COUNT=30`、`HOT_SCORE_TIME_DECAY_DAYS=14`、`HOT_SCORE_DECAY_POWER=1.5`；均为可调默认值。无新增数据库迁移。
+
+## beta15 增补
+
+对应《课程资料平台用户权责、内容治理与授权收益体系设计文档》v1.0 与《高并发 高可用与性能工程专项设计方案》v1.0。迁移 `0010_beta15_governance`（33 张新表 + 两处状态约束 + 订单快照列），单一 head。
+
+### 三级 RBAC 与资源级隔离（§3、§15.2）
+
+| 接口 | 权限与契约 |
+| --- | --- |
+| `POST /admin/permission-assignments` | `assignment.manage`；`permission` 必须属于 `ALL_PERMISSIONS`，`scope` 取 `AdminPermissionScope`，`reason` 必填；写审计与 `assignment.changed` 事件 |
+| `GET /admin/permission-assignments` | `assignment.manage`；CursorPage，可按 `user_id` 过滤 |
+| `POST /admin/permission-assignments/{id}/revoke` | `assignment.manage`；理由必填，置 `revoked_at`/`revoked_by`，不物理删除 |
+| `POST /admin/resource-assignments` | `assignment.manage`；`resource_id` 与 `course_id` 二选一，目标必须存在，`capability` 取 `AssignmentCapability` |
+| `GET /admin/resource-assignments` | `assignment.manage`；CursorPage，可按 `user_id` 过滤 |
+| `POST /admin/resource-assignments/{id}/revoke` | `assignment.manage`；理由必填 |
+| `GET /me/assignments` | 登录；仅本人当前有效分配与按需授权 |
+
+`require()` 由「角色权限」升级为「角色权限 ∪ 未过期按需授权」（`app.core.permissions.effective_permissions`）。三级角色与既有枚举对应：普通用户 `user`、资料管理员 `contributor`、系统管理员 `reviewer`（有限权限集合）与 `admin`（全权限）；`admin` 的收窄模式未启用。`resource_assignments` 的判定在 owner 之外**追加**，列表、详情、版本清单共用同一作用域过滤；审核权限仍由 `resource.review` 决定，不由分配放宽。
+
+### 贡献者入驻与审核补证（§3.4、§5、§14.1）
+
+| 接口 | 权限与契约 |
+| --- | --- |
+| `POST /me/contributor-applications` | 登录即可（普通用户可直接投稿，不受入驻影响）；限频 + 未关闭申请上限；已 `active` 重复申请 409 |
+| `GET /me/contributor-applications` | 登录；仅本人；CursorPage |
+| `GET /admin/contributor-applications` | `contributor.review`；可按状态过滤 |
+| `POST /admin/contributor-applications/{id}/decisions` | `contributor.review`；`under_review` / `active` / `rejected`，理由必填；`active` 时仅做 `user → contributor` 最小提升 |
+
+`ModerationDecisionType` 与 `ReviewStatus` 新增 `needs_info`：`POST /admin/reviews/{id}/decision` 支持「要求补证」，置 `needs_info`、不发布、不覆盖旧结论；补证后重投形成新的审核记录，`uq_reviews_active_version` 口径不变。
+
+### 案件与侵权通知（§13、§15.5）
+
+| 接口 | 权限与契约 |
+| --- | --- |
+| `POST /cases` | 登录；`delivery_dispute` / `revenue_dispute` / `general_appeal`；校验可主张对象；限频 + 未关闭上限 |
+| `GET /me/cases` | 登录；仅本人；类型/状态筛选 + 游标分页 |
+| `GET /me/cases/{id}` | 登录；仅本人或处理人；**分层返回**，不含内部备注、证据原文与处理人 |
+| `POST /rights-notices` | 登录，**无需购买**；收集权利人身份与渠道、权利证明、内容地址/版本、初步证据、请求措施、真实性声明；限频；响应只回工单号与状态 |
+| `POST /rights-notices/{id}/counter-statements` | 仅被通知方或合法代理；写反通知并按 `RIGHTS_NOTICE_COUNTER_DEADLINE_DAYS` 记录 `deadline_at`（仅记录，不代表统一适用十五日） |
+| `GET /admin/cases` | `case.handle` 或 `rights_notice.handle` |
+| `POST /admin/cases/{id}/events` | `case.handle`；`triaged`/`forwarded`/`decided`/`closed`/`note`，理由必填 |
+| `POST /admin/cases/{id}/measures` | `case.handle`；`unpublish` / `block_download` / `block_sales` / `restrict_preview` / `freeze_revenue`，对象、范围、理由必填 |
+| `POST /admin/cases/{id}/measures/{measure_id}/release` | `case.handle`；解除措施但**不自动重新公开** |
+
+措施效果：`unpublish` 置资源 `withdrawn`；`block_download` / `restrict_preview` 复用 access 撤权语义（只改状态、不删凭证）；`block_sales` / `freeze_revenue` 在商业化关闭时只记录措施并标注未启用。`active_measures()` 供其他模块查询生效中的措施。
+
+### 授权协议与双向定价（§6—§8、§15.3，商业化关闭）
+
+| 接口 | 权限与契约 |
+| --- | --- |
+| `GET /me/agreements` | 登录；仅本人协议及历史版本 |
+| `POST /agreements/{version_id}/acceptances` | 主体签约权限；`accepted_hash` 必须与服务端一致 |
+| `POST /products/{product_id}/price-proposals` | 权利方或获准代理；`suggested_fen > 0`；改价重建版本 |
+| `POST /price-proposals/{id}/acceptances` | 确认方由服务端按会话与签约授权判定；双方确认**同版本同哈希**才 `confirmed` |
+| `POST /admin/agreements`、`POST /admin/agreements/{id}/versions` | `agreement.manage`；生成新版本，不覆盖旧版 |
+| `POST /admin/price-proposals/{id}/acceptances` | `price.confirm`；平台不可代贡献者确认 |
+| `POST /admin/revenue-rule-versions` | `agreement.manage`；`creator_bps` 必须显式给出（0–10000），发布后不可改 |
+| `POST /admin/product-composition-versions` | `agreement.manage`；权重非负且至少一项正数；缺组件许可时上架失败 |
+
+`assert_sellable()`：无有效销售许可、确认价格或收益规则时拒绝创建新付费订单（§14.4 不变量 1）。偏差：项目无 SKU 表，定价挂在 `products`；无 `parties` 表，主体用 `users.id` 加平台哨兵；金额用 CNY 整数分。
+
+### 订单明细分配与账本（§9—§11、§15.4/§15.5，商业化关闭）
+
+新增 `order_item_component_allocations`、`order_item_allocations`、`grant_components`、`refund_items`、`refund_component_allocations`、`refund_beneficiary_reversals`、`ledger_accounts`、`ledger_journals`、`ledger_lines`、`allocation_reservations`；`orders` / `order_items` 增加快照列。
+
+服务契约：`allocate_order_item`（组件与受益人分配，金额守恒、分尾差确定性）、`accrue_revenue`（借贷相等、`event_key` 全局唯一）、`reverse_revenue_for_refund`（累计冲回 ≤ 原可冲回，平台冲回只计一次）、`reserve_allocation` / `release_reservation`、`settleable_balance`。锁顺序统一为：用户交易锁 → 订单 → receipt/claim/refund → grant 与会员段 → allocation（ID 排序）→ 结算单/payout → ledger_accounts（ID 排序）。明细退款 `scope=ORDER_ITEMS` 恒返回 `REFUND_SCOPE_UNSUPPORTED`（不静默退整单），`FULL_ORDER` 原语义不变。
+
+### 结算与付款（§12、§15.5，商业化关闭）
+
+| 接口 | 权限与契约 |
+| --- | --- |
+| `GET /me/settlement-statements` | 登录；仅本人；账户脱敏；游标分页 |
+| `POST /settlement-statements/{id}/confirm` | 本人合同收款主体；版本校验 |
+| `POST /settlement-statements/{id}/disputes` | 关联争议行与金额；置 `disputed` |
+| `POST /admin/settlement-statements` | `settlement.manage`；按成熟与预留过滤，预留金额不进新批次 |
+| `POST /admin/settlement-statements/{id}/approve` | `settlement.manage`；批准锁批，版本校验 |
+| `POST /admin/payouts/{id}/attempts` | `payout.manage`；账户快照核验；最低付款额未配置则 `NotEnabled` |
+| `POST /admin/payout-attempts/{id}/reconcile` | `payout.manage`；`succeeded`/`failed`/`uncertain`，证据必填；`external_ref_key` 唯一；`uncertain` 持续占款 |
+| `POST /admin/ledger-corrections` | `settlement.manage`；关联原记录的反向分录，不直接改余额 |
+
+### 缓存、事件与指标（高并发专项 §8、§10、§12）
+
+`app/core/cache.py`：按 `CacheClass` 分级的有界 TTL 缓存。`public_read` 回源失败返回旧值或 None 不抛出（有界回源）；`viewer_scoped` 短 TTL 且支持 `invalidate(prefix)` 写后失效；`auth_sensitive` / `no_cache` **永不缓存**，缓存不可用时仍直连数据库，权限、会话撤销与硬配额不因缓存故障放行；`CACHE_ENABLED=false` 全部直连；`CACHE_MAX_ENTRIES` 上限 + LRU 淘汰。
+
+`app/modules/notification/reconcile.py`：`reconcile_events`（只读统计 pending/processing/processed/failed、超过 `EVENT_REPLAY_MAX_ATTEMPTS` 的毒任务、重复 `dedupe_key`）、`replay_failed_events`（failed → pending，幂等，写审计）。
+
+| 接口 | 权限与契约 |
+| --- | --- |
+| `GET /admin/metrics` | `metrics.view`；`OPS_METRICS_ENABLED=false` 时 `NotEnabled`；只读返回连接池预算、缓存统计、域事件积压、任务积压与慢查询阈值，不写库、不自动处置 |
+
+配置：`CONTRIBUTOR_APPLICATION_*`、`CASE_*`、`RIGHTS_NOTICE_*`、`COMMERCE_COMPLIANCE_GATE_CLOSED=true`、`REVENUE_DEFAULT_CREATOR_BPS=0`、`SETTLEMENT_MIN_PAYOUT_FEN=0`、`CACHE_*`、`DB_POOL_TIMEOUT_SECONDS=5`、`SLOW_QUERY_MS=300`、`EVENT_REPLAY_MAX_ATTEMPTS=5`、`OPS_METRICS_ENABLED=true`；均为可调默认值，非最终运营策略。

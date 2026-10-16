@@ -9,13 +9,16 @@ import {
   BookOpen,
   ChevronDown,
   FileUp,
+  Gavel,
   Heart,
   Home,
   LogOut,
+  ScrollText,
   Search,
   MessageSquare,
   ShieldCheck,
   UserCog,
+  UserPlus,
 } from 'lucide-react';
 
 import { Button } from '@/components/ui/Button';
@@ -139,6 +142,9 @@ export function AppHeader() {
                     <MenuLink href="/me" icon={UserCog} label="个人总览" />
                     <MenuLink href="/me/resources" icon={BookOpen} label="我的资料" />
                     <MenuLink href="/me/contributions" icon={Award} label="我的贡献" />
+                    <MenuLink href="/me/contributor-application" icon={UserPlus} label="入驻申请" />
+                    <MenuLink href="/me/cases" icon={Gavel} label="我的案件" />
+                    <MenuLink href="/me/agreements" icon={ScrollText} label="我的协议" />
                     <MenuLink href="/me/profile" icon={UserCog} label="个人资料" />
                     <MenuLink href="/me/favorites" icon={Heart} label="我的收藏" />
                     <MenuLink href="/me/follows" icon={BookOpen} label="我的关注" />

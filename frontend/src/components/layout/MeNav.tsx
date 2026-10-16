@@ -14,6 +14,9 @@ const items = [
   { href: '/me/follows', label: '我的关注' },
   { href: '/me/notifications', label: '通知' },
   { href: '/me/reports', label: '举报与申诉' },
+  { href: '/me/contributor-application', label: '入驻申请' },
+  { href: '/me/cases', label: '我的案件' },
+  { href: '/me/agreements', label: '我的协议' },
   { href: '/me/security', label: '账号与安全' },
 ];
 

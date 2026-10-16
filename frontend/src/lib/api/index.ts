@@ -20,3 +20,6 @@ export * as interactionApi from './interaction';
 export * as notificationApi from './notification';
 export * as moderationApi from './moderation';
 export * as adminApi from './admin';
+export * as casesApi from './cases';
+export * as assignmentApi from './assignment';
+export * as licensingApi from './licensing';

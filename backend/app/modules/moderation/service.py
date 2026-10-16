@@ -357,6 +357,8 @@ async def decide(
 
     决定不可原地覆盖；并发时过期快照或已处理任务抛 Conflict（§13.3、§29）。
     审核通过时调用 content.service.mark_published 切换公开版本。
+    补证（NEEDS_INFO）只置版本审核状态为 needs_info，不发布、不切换公开指针；
+    作者补充材料后创建关联修订重投，旧结论保留（用户权责 §14.1、§16.3）。
     """
     review = await get_review(db, review_id)
 
@@ -373,14 +375,21 @@ async def decide(
             raise InvalidInput("紧急管理员自审必须填写明确理由")
         emergency_self_review = True
 
-    if decision not in (ModerationDecisionType.APPROVE, ModerationDecisionType.REJECT):
+    if decision not in (
+        ModerationDecisionType.APPROVE,
+        ModerationDecisionType.NEEDS_INFO,
+        ModerationDecisionType.REJECT,
+    ):
         raise InvalidInput("审核决定无效")
+    if decision == ModerationDecisionType.NEEDS_INFO and not reason:
+        # 补证必须说明需要补充的材料；材料齐备后作者创建关联修订重投，不覆盖本结论（§14.1）。
+        raise InvalidInput("补证决定必须说明需要补充的材料")
 
-    new_status = (
-        ReviewStatus.APPROVED
-        if decision == ModerationDecisionType.APPROVE
-        else ReviewStatus.REJECTED
-    )
+    new_status = {
+        ModerationDecisionType.APPROVE: ReviewStatus.APPROVED,
+        ModerationDecisionType.NEEDS_INFO: ReviewStatus.NEEDS_INFO,
+        ModerationDecisionType.REJECT: ReviewStatus.REJECTED,
+    }[decision]
 
     # 条件更新：仅当仍为待审且快照一致时生效；两名审核员并发只有一个生效（§29 A07）。
     result = await db.execute(
@@ -446,11 +455,11 @@ async def decide(
 
     await emit_event(
         db,
-        event_type=(
-            DomainEventType.RESOURCE_VERSION_APPROVED
-            if decision == ModerationDecisionType.APPROVE
-            else DomainEventType.RESOURCE_VERSION_REJECTED
-        ),
+        event_type={
+            ModerationDecisionType.APPROVE: DomainEventType.RESOURCE_VERSION_APPROVED,
+            ModerationDecisionType.NEEDS_INFO: DomainEventType.REVIEW_NEEDS_INFO,
+            ModerationDecisionType.REJECT: DomainEventType.RESOURCE_VERSION_REJECTED,
+        }[decision],
         subject_type="resource_version",
         subject_id=review.version_id,
         subject_version=snapshot_revision,

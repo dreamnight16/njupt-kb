@@ -161,11 +161,13 @@ class Beta14SecurityOverviewTests(unittest.IsolatedAsyncioTestCase):
     # --- 权限 ------------------------------------------------------------------
     async def test_security_overview_requires_audit_view(self):
         dependency = require(AUDIT_VIEW)
+        # beta15 起 require() 按「角色权限 ∪ 未过期按需授权」判定，需要数据库会话解析授权；
+        # 本用例直接调用依赖，因此显式传入会话。
         # 无 audit.view 的普通用户被拒绝（账号状态检查之后的权限判定）。
         with self.assertRaises(Forbidden):
-            await dependency(self.plain)
+            await dependency(self.plain, self.db)
         # 管理员拥有全部权限，放行。
-        self.assertIs(await dependency(self.admin), self.admin)
+        self.assertIs(await dependency(self.admin, self.db), self.admin)
         # 审核员按 §15 权限表持有 audit.view，同样放行。
         reviewer = User(
             email="reviewer@example.test",
@@ -175,7 +177,7 @@ class Beta14SecurityOverviewTests(unittest.IsolatedAsyncioTestCase):
         )
         self.db.add(reviewer)
         await self.db.flush()
-        self.assertIs(await dependency(reviewer), reviewer)
+        self.assertIs(await dependency(reviewer, self.db), reviewer)
 
 
 if __name__ == "__main__":

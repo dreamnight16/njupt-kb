@@ -80,7 +80,8 @@ export type RightsBasis =
   | 'third_party'
   | 'unverified';
 
-export type ModerationDecisionType = 'approve' | 'reject';
+// beta15：新增「补证」决定（用户权责体系 §14.1、§16.3）。
+export type ModerationDecisionType = 'approve' | 'needs_info' | 'reject';
 
 export type ReportStatus =
   | 'open'

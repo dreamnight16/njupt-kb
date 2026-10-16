@@ -81,3 +81,103 @@ export async function listMyContributions(
   });
   return data;
 }
+
+// --- 贡献者入驻（§3.4；backend/app/modules/creator）---
+
+/** 贡献者入驻状态机；降级不抹去已生效授权与已得收益。 */
+export type ContributorOnboardingStatus =
+  | 'applied'
+  | 'under_review'
+  | 'active'
+  | 'rejected'
+  | 'suspended'
+  | 'exited';
+
+export const CONTRIBUTOR_ONBOARDING_STATUS_LABELS: Record<ContributorOnboardingStatus, string> = {
+  applied: '已提交',
+  under_review: '审核中',
+  active: '已入驻',
+  rejected: '未通过',
+  suspended: '已暂停',
+  exited: '已退出',
+};
+
+export interface ContributorApplicationOut {
+  id: string;
+  user_id: string;
+  status: ContributorOnboardingStatus;
+  capability_summary: string;
+  rights_materials_ref: string;
+  verification_ref: string | null;
+  contract_party_ref: string | null;
+  submitted_at: string;
+  decided_at: string | null;
+  decided_by: string | null;
+  decision_reason: string | null;
+  closed_at: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface ContributorApplicationCreate {
+  capability_summary: string;
+  rights_materials_ref: string;
+  verification_ref?: string | null;
+  contract_party_ref?: string | null;
+}
+
+/** 审核决定：受理（转审核中）、通过入驻、拒绝。理由必填。 */
+export type ContributorDecision = 'under_review' | 'active' | 'rejected';
+
+export const CONTRIBUTOR_DECISION_LABELS: Record<ContributorDecision, string> = {
+  under_review: '受理（转审核中）',
+  active: '通过入驻',
+  rejected: '拒绝',
+};
+
+export interface ContributorApplicationDecisionIn {
+  decision: ContributorDecision;
+  reason: string;
+}
+
+export async function submitContributorApplication(
+  payload: ContributorApplicationCreate,
+): Promise<ContributorApplicationOut> {
+  const { data } = await api.post<ContributorApplicationOut>(
+    '/me/contributor-applications',
+    payload,
+  );
+  return data;
+}
+
+export async function listMyContributorApplications(
+  cursor?: string | null,
+): Promise<CursorPage<ContributorApplicationOut>> {
+  const { data } = await api.get<CursorPage<ContributorApplicationOut>>(
+    '/me/contributor-applications',
+    { params: { cursor: cursor || undefined } },
+  );
+  return data;
+}
+
+export async function listContributorApplications(params: {
+  status?: ContributorOnboardingStatus[];
+  cursor?: string | null;
+} = {}): Promise<CursorPage<ContributorApplicationOut>> {
+  const { data } = await api.get<CursorPage<ContributorApplicationOut>>(
+    '/admin/contributor-applications',
+    { params: { ...params, cursor: params.cursor || undefined } },
+  );
+  return data;
+}
+
+export async function decideContributorApplication(
+  applicationId: string,
+  payload: ContributorApplicationDecisionIn,
+): Promise<ContributorApplicationOut> {
+  const { data } = await api.post<ContributorApplicationOut>(
+    `/admin/contributor-applications/${applicationId}/decisions`,
+    payload,
+  );
+  return data;
+}

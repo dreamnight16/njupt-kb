@@ -284,6 +284,64 @@ export async function fetchSecurityOverview(): Promise<SecurityOverviewOut> {
   return data;
 }
 
+// --- 只读 SLO 指标（backend/app/modules/ops/router.py，高并发专项 §13）---
+
+export interface DbPoolBudgetOut {
+  pool_size: number;
+  max_overflow: number;
+  pool_timeout_seconds: number;
+}
+
+export interface CacheClassStatsOut {
+  entries: number;
+  hits: number;
+  misses: number;
+}
+
+export interface CacheStatsOut {
+  enabled: boolean;
+  entries: number;
+  max_entries: number;
+  hits: number;
+  misses: number;
+  evictions: number;
+  invalidations: number;
+  by_class: Record<string, CacheClassStatsOut>;
+}
+
+export interface EventBacklogOut {
+  pending: number;
+  processing: number;
+  processed: number;
+  failed: number;
+  over_max_attempts: number;
+  duplicate_dedupe_keys: number;
+}
+
+export interface JobBacklogOut {
+  queued: number;
+  running: number;
+  retry_wait: number;
+  succeeded: number;
+  failed: number;
+  cancelled: number;
+  total: number;
+}
+
+export interface MetricsOut {
+  db_pool: DbPoolBudgetOut;
+  cache: CacheStatsOut;
+  events: EventBacklogOut;
+  jobs: JobBacklogOut;
+  slow_query_ms: number;
+  generated_at: string;
+}
+
+export async function fetchMetrics(): Promise<MetricsOut> {
+  const { data } = await api.get<MetricsOut>('/admin/metrics');
+  return data;
+}
+
 // --- 管理员目录维护（backend/app/modules/catalog/router.py）---
 
 export type CatalogEntityType =

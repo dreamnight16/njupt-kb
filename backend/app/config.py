@@ -169,6 +169,44 @@ class Settings(BaseSettings):
     OPS_ALERT_FAILED_EVENTS: int = 20
     OPS_ALERT_CRITICAL_MULTIPLIER: int = 3
 
+    # --- beta15 贡献者入驻（用户权责 §3.4、§5）---
+    # 同时进行中的入驻申请上限与提交频控；均为可调默认值，不是最终运营策略。
+    CONTRIBUTOR_APPLICATION_OPEN_CAP: int = Field(default=1, ge=0)
+    CONTRIBUTOR_APPLICATION_RATE_LIMIT: int = Field(default=3, ge=0)
+    CONTRIBUTOR_APPLICATION_RATE_WINDOW_SECONDS: int = Field(default=86400, ge=1)
+
+    # --- beta15 案件与侵权通知（用户权责 §13、§16.2）---
+    # 侵权通知无需购买即可提交，但仍限频以防滥用；期限按适用法定路径记录，不写死十五日。
+    CASE_OPEN_CAP: int = Field(default=10, ge=0)
+    CASE_RATE_LIMIT: int = Field(default=10, ge=0)
+    CASE_RATE_WINDOW_SECONDS: int = Field(default=3600, ge=1)
+    RIGHTS_NOTICE_RATE_LIMIT: int = Field(default=5, ge=0)
+    RIGHTS_NOTICE_RATE_WINDOW_SECONDS: int = Field(default=86400, ge=1)
+    # 反通知转送权利人后的处理期限（日）。默认沿用电商法第 43 条的十五日口径，
+    # 但仅作为记录字段写入 case_events.deadline_at，不代表所有案件统一适用。
+    RIGHTS_NOTICE_COUNTER_DEADLINE_DAYS: int = Field(default=15, ge=1)
+
+    # --- beta15 商业化门槛（用户权责 §2.5 G1—G8、§14.4）---
+    # 生产收费与贡献者结算在门槛核实前保持关闭；开启后仍受 COMMERCE_ENABLED 约束。
+    COMMERCE_COMPLIANCE_GATE_CLOSED: bool = True
+    # 分成比例与最低付款额默认 0 表示「未配置」：不套用 80/20 或 85/15 示例值，
+    # 未配置时结算/报价接口抛 NotEnabled，不产生任何默认商业条款。
+    REVENUE_DEFAULT_CREATOR_BPS: int = Field(default=0, ge=0, le=10000)
+    SETTLEMENT_MIN_PAYOUT_FEN: int = Field(default=0, ge=0)
+
+    # --- beta15 缓存与降级（高并发专项 §8、§12）---
+    # 进程内有界缓存：Redis 不可用时的回退，且不得放行权限、会话撤销与硬配额。
+    CACHE_ENABLED: bool = True
+    CACHE_MAX_ENTRIES: int = Field(default=2000, ge=0)
+    CACHE_PUBLIC_TTL_SECONDS: int = Field(default=60, ge=1)
+    CACHE_VIEWER_TTL_SECONDS: int = Field(default=10, ge=1)
+    # 连接池等待上限；用于约束峰值等待而非按 QPS 放大连接数（§3.2）。
+    DB_POOL_TIMEOUT_SECONDS: int = Field(default=5, ge=1)
+    # 慢查询记录阈值与事件重放上限；只做观测与对账，不自动处置。
+    SLOW_QUERY_MS: int = Field(default=300, ge=1)
+    EVENT_REPLAY_MAX_ATTEMPTS: int = Field(default=5, ge=1)
+    OPS_METRICS_ENABLED: bool = True
+
     # --- 邮件（§21：仅用于验证与找回密码）---
     MAIL_ENABLED: bool = False
     MAIL_FROM: str = "no-reply@example.com"

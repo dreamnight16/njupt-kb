@@ -624,10 +624,15 @@ async def _next_version_no(db: AsyncSession, resource_id: uuid.UUID) -> int:
     return (current or 0) + 1
 
 
-async def _ensure_owner(resource: Resource, user) -> None:
+async def _ensure_owner(db: AsyncSession, resource: Resource, user) -> None:
     if resource.owner_id != user.id and user.role != "admin":
-        # 私有对象统一 404，避免泄露存在性（§25.1）。
-        raise NotFound("资源不存在")
+        # owner 判定之外只追加分配判定；审核权限语义不变（§3.3）。
+        from app.core.enums import AssignmentCapability
+        from app.modules.assignment.service import can_manage_resource
+
+        if not await can_manage_resource(db, user, resource.id, AssignmentCapability.MAINTAIN):
+            # 私有对象统一 404，避免泄露存在性（§25.1）。
+            raise NotFound("资源不存在")
 
 
 async def _validate_offering(db: AsyncSession, *, course_id: uuid.UUID, offering_id: uuid.UUID | None) -> None:
@@ -703,7 +708,7 @@ async def create_version(
 ) -> VersionOut:
     """创建修订草稿；被驳回后修订形成新的可追溯提交（§12.1）。"""
     resource = await get_resource(db, resource_id)
-    await _ensure_owner(resource, user)
+    await _ensure_owner(db, resource, user)
     version = ResourceVersion(
         resource_id=resource.id,
         version_no=await _next_version_no(db, resource.id),
@@ -745,7 +750,7 @@ async def update_version(
 ) -> VersionOut:
     """修改本人可编辑草稿；用 revision 做条件更新，过期提交返回 409（§13.3）。"""
     resource = await get_resource(db, resource_id)
-    await _ensure_owner(resource, user)
+    await _ensure_owner(db, resource, user)
     version = await get_version(db, version_id)
     if version.resource_id != resource.id:
         raise NotFound("版本不属于该资源")
@@ -803,7 +808,7 @@ async def submit_version(
     from app.modules.moderation.service import open_review
 
     resource = await get_resource(db, resource_id)
-    await _ensure_owner(resource, user)
+    await _ensure_owner(db, resource, user)
     version = await get_version(db, version_id)
     if version.resource_id != resource.id:
         raise NotFound("版本不属于该资源")
@@ -911,12 +916,18 @@ async def get_resource_detail(db: AsyncSession, *, user, resource_id: uuid.UUID)
     from app.modules.interaction.service import resource_rating_summary
 
     resource = await get_resource(db, resource_id)
-    is_owner = bool(user) and user.id == resource.owner_id
+    from app.core.enums import AssignmentCapability
+    from app.modules.assignment.service import can_manage_resource
+
+    # owner 判定之外只追加分配判定，与列表/搜索使用同一作用域（§3.3）。
+    manages = bool(user) and await can_manage_resource(
+        db, user, resource.id, AssignmentCapability.MAINTAIN
+    )
     is_public = (
         resource.publication_status == PublicationStatus.PUBLISHED.value
         and resource.published_version_id is not None
     )
-    if not (is_public or is_owner or _is_manager(user)):
+    if not (is_public or manages or _is_manager(user)):
         raise NotFound("资源不存在")
 
     version = await published_version(db, resource)
@@ -1122,13 +1133,19 @@ async def list_version_files(
     version = await get_version(db, version_id)
     if version.resource_id != resource.id:
         raise NotFound("版本不属于该资源")
-    is_owner = bool(user) and user.id == resource.owner_id
+    from app.core.enums import AssignmentCapability
+    from app.modules.assignment.service import can_manage_resource
+
+    # owner 判定之外只追加分配判定，与列表/详情使用同一作用域（§3.3）。
+    manages = bool(user) and await can_manage_resource(
+        db, user, resource.id, AssignmentCapability.MAINTAIN
+    )
     is_public = (
         resource.publication_status == PublicationStatus.PUBLISHED.value
         and resource.published_version_id == version.id
     )
     # 历史版本默认仅作者与有权限管理人员可见（§12.1、D08）。
-    if not (is_owner or is_public or _is_manager(user)):
+    if not (manages or is_public or _is_manager(user)):
         raise NotFound("版本不存在")
 
     from app.modules.access.service import authorize

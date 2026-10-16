@@ -1,5 +1,31 @@
 # 变更记录
 
+## 0.0.1-beta.15 — 2026-10-17
+
+按《课程资料平台用户权责、内容治理与授权收益体系设计文档》v1.0 与《高并发 高可用与性能工程专项设计方案》v1.0 推进：把三级 RBAC 与资源级隔离、贡献者入驻与审核补证、案件与侵权通知闭环、授权协议与双向定价、订单明细分配与账本、结算与付款核实，以及缓存/事件/指标硬化收进一轮。新增 33 张表、迁移 `0010_beta15_governance`。
+
+- **三级 RBAC 与资源级隔离（§3、§15.2）**：新增 `admin_permission_assignments`（按职责追加的系统管理员权限，含 `scope`/`valid_until`，撤销走 `revoked_at` 不物理删除）与 `resource_assignments`（资料管理员的对象级作用范围，资源或课程二选一由 CheckConstraint 保证，`capability` 分 maintain/review/manage）。`require()` 由「角色权限」升级为「角色权限 ∪ 未过期按需授权」（`core.permissions.effective_permissions`）。新增 9 个权限常量（`contributor.review`、`assignment.manage`、`case.handle`、`rights_notice.handle`、`agreement.manage`、`price.confirm`、`ledger.view`、`payout.manage`、`metrics.view`）。新增 `/admin/permission-assignments`（授予/查询/撤销）、`/admin/resource-assignments`（授予/查询/撤销）与 `GET /me/assignments`。分配判定在 owner 之外**追加**，列表、详情、版本清单共用同一作用域过滤；审核权限仍由 `resource.review` 决定，不由分配放宽。
+- **贡献者入驻与审核补证（§3.4、§5、§14.1）**：新增 `contributor_applications`（applied→under_review→active/rejected；保留 suspended/exited 但本版不实现降级）。普通用户仍可直接投稿免费内容，入驻只影响有偿销售的准入。接口 `POST/GET /me/contributor-applications`、`GET /admin/contributor-applications`、`POST /admin/contributor-applications/{id}/decisions`（`contributor.review`，理由必填，`active` 时仅做 `user → contributor` 最小提升）。`ModerationDecisionType` 与 `ReviewStatus` 新增 `needs_info`：审核可「要求补证」，置 `needs_info`、不发布、不覆盖旧结论，重投形成新的审核记录。
+- **案件与侵权通知闭环（§13、§15.5）**：新增 `cases`/`case_events`/`case_measures`/`rights_notices`/`counter_statements`。用户侧 `POST /cases`、`GET /me/cases`、`GET /me/cases/{id}`（分层返回，不含内部备注、证据原文与处理人）、`POST /rights-notices`（**无需购买**即可提交，限频，身份证明仅受理人员可见）、`POST /rights-notices/{id}/counter-statements`（仅被通知方或合法代理）。后台 `GET /admin/cases`、`POST /admin/cases/{id}/events`、`POST /admin/cases/{id}/measures`、`POST /admin/cases/{id}/measures/{measure_id}/release`。措施效果：`unpublish` 置资源 `withdrawn`；`block_download`/`restrict_preview` 复用 access 撤权语义（只改状态、不删凭证）；`block_sales`/`freeze_revenue` 在商业化关闭时只记录并标注未启用；**release 不自动重新公开**。反通知期限按 `RIGHTS_NOTICE_COUNTER_DEADLINE_DAYS` 写入 `deadline_at` 作为记录，不宣称所有案件统一适用十五日。
+- **授权协议与双向定价（§6—§8、§15.3）**：新增 `license_agreements`/`agreement_versions`/`agreement_acceptances`/`price_proposals`/`price_acceptances`/`revenue_rule_versions`/`product_composition_versions`/`product_components`/`free_license_acceptances`。双方确认**同版本同哈希**价格才生效；改价重建版本；平台不可代贡献者确认；`creator_bps` 必须显式给出（0–10000）且发布后不可改；组件权重非负且至少一项正数，缺组件许可时上架失败。导出 `assert_sellable`（无有效许可/确认价格/收益规则不得创建新付费订单）。
+- **订单明细分配与账本（§9—§11、§15.4/§15.5）**：`orders`/`order_items` 增加快照列（全部可空，仅 `refunded_fen` 为 NOT NULL DEFAULT 0 以兼容既有行）；新增 `order_item_component_allocations`/`order_item_allocations`/`grant_components`/`refund_items`/`refund_component_allocations`/`refund_beneficiary_reversals`/`ledger_accounts`/`ledger_journals`/`ledger_lines`/`allocation_reservations`。服务：`allocate_order_item`（金额守恒、分尾差确定性）、`accrue_revenue`（借贷相等、`event_key` 全局唯一保证一次事件不重复计提）、`reverse_revenue_for_refund`（累计冲回 ≤ 原可冲回，平台冲回只计一次）、`reserve_allocation`/`release_reservation`、`settleable_balance`。锁顺序统一为「用户交易锁 → 订单 → receipt/claim/refund → grant 与会员段 → allocation（ID 排序）→ 结算单/payout → ledger_accounts（ID 排序）」。明细退款 `scope=ORDER_ITEMS` 恒返回 `REFUND_SCOPE_UNSUPPORTED`，**不静默退整单**；`FULL_ORDER` 原语义不变。
+- **结算与付款（§12、§15.5）**：新增 `settlement_statements`/`settlement_items`/`payouts`/`payout_attempts`/`recovery_claims`/`tax_records`。接口：本人结算单（账户脱敏）/确认/异议；后台生成结算草稿（按成熟与预留过滤，预留金额不进新批次）、批准锁批、付款 attempt、核对 `succeeded`/`failed`/`uncertain`（证据必填、`external_ref_key` 唯一、`uncertain` 持续占款）、账务更正（关联原记录的反向分录，不直接改余额）。`reconcile_pending_payouts` 只读核对，**不自动重放外部转账**。
+- **缓存、事件与指标硬化（高并发专项 §8、§10、§12）**：新增 `core/cache.py`，按 `CacheClass` 分级的有界 TTL 缓存——`public_read` 回源失败返回旧值或 None 不抛出（有界回源，避免雪崩放大）、`viewer_scoped` 短 TTL 且支持写后失效、`auth_sensitive`/`no_cache` **永不缓存**（权限、会话撤销与硬配额不因缓存故障放行）、`CACHE_MAX_ENTRIES` 上限 + LRU 淘汰。新增 `notification/reconcile.py`（`reconcile_events` 只读统计积压/毒任务/重复 `dedupe_key`；`replay_failed_events` 幂等重排）。新增只读 `GET /admin/metrics`（`metrics.view`，开关关闭抛 `NotEnabled`）：连接池预算、缓存统计、域事件积压、任务积压与慢查询阈值，不写库、不自动处置。
+- **通知与前端**：为 beta15 新增的 10 类域事件登记通知处理器（补证、入驻、权限变更、案件、侵权通知），处理人本人不收到自己的通知，事件重试不重复投递。前端新增 9 个页面（`/me/contributor-application`、`/me/cases`、`/me/cases/[id]`、`/rights-notice`、`/me/agreements`、`/admin/cases`、`/admin/contributor-applications`、`/admin/assignments`、`/admin/metrics`）与对应导航入口，审核页新增「要求补证」，全部遵循 DNDL 与 `prefers-reduced-motion`。
+- 前后端及锁文件统一 `0.0.1-beta.15`；迁移 `0010_beta15_governance`（`down_revision = 0009_beta13_retention`），单一 head。
+
+### 验证与部署边界
+
+- 后端隔离 SQLite 全量 **337 项通过**（beta14 基线 233 项 + beta15 新增 104 项）；beta15 新增测试文件：`test_beta15_rbac.py`(14)、`test_beta15_cases.py`(17)、`test_beta15_cache.py`(11)、`test_beta15_ops_metrics.py`(8)、`test_beta15_creator.py`(11)、`test_beta15_review_needs_info.py`(7)、`test_beta15_licensing.py`(14)、`test_beta15_commerce_alloc.py`(9)、`test_beta15_settlement.py`(13)。
+- 迁移 `0010_beta15_governance` 离线 PostgreSQL 升级 SQL 生成通过，单一 head；33 张新表均为增量新增，不改既有列语义、不回填、不改写历史数据。`require()` 改为按有效权限判定后，`test_beta14_security` 的依赖直调用例同步传入会话（签名变更的适配，断言不变）。
+- 前端 `tsc --noEmit`、`eslint` 与生产构建通过。
+- **仍为 NOT_RUN/待验收**（本机无 Docker/PostgreSQL/Redis/MinIO/ClamAV）：真实 PostgreSQL 迁移与并发（行锁、唯一约束在真实引擎下的行为）、对象存储与扫描联调、Celery/真实邮件、受信代理与入口限流、真实收款/退款/贡献者付款闭环。SQLite 与离线 SQL 不能代替这些验证。
+- 商业化保持关闭：`COMMERCE_ENABLED=false` 且 `COMMERCE_COMPLIANCE_GATE_CLOSED=true`；`REVENUE_DEFAULT_CREATOR_BPS=0`、`SETTLEMENT_MIN_PAYOUT_FEN=0` 表示「未配置」，未配置时报价/结算抛 `NotEnabled`，不产生任何默认商业条款。AI 保持关闭。本轮为本地迭代，不据此宣称已部署或发布。
+
+### 规划对应与边界
+
+对应《用户权责、内容治理与授权收益体系设计文档》v1.0 的 §3（三级 RBAC 与资源级隔离）、§5（投稿与审核）、§13（争议与侵权通知）、§6—§8（授权、定价与商品）、§9—§12（订单、收益、退款、结算）、§14（状态机与不变量）、§15（数据库设计）、§16（API 与事务契约），以及《高并发 高可用与性能工程专项设计方案》v1.0 的 §8（缓存与撤权一致性）、§10（任务与事件可靠性）、§12（故障降级）、§13（监控告警）。边界：G1—G8 上线门槛未核实，生产收费与贡献者结算不开放；`Role.ADMIN` 的收窄模式未启用（仍为全权限）；`resource_assignments` 未纳入 `withdraw_resource` 与上传会话创建；`role` 提升只做 `user → contributor` 最小变更；对 ORDER/OTHER 类案件目标无法核验被通知方时不阻断；后台案件事件仅推进案件状态机，未联动 `rights_notices.status`；明细退款与多贡献者合单按 §18.3 留待第二阶段，本版恒返回 `REFUND_SCOPE_UNSUPPORTED`；licensing 未写域事件（`DomainEventType` 无对应类型）；项目无 SKU 与 `parties` 表，定价挂 `products`、主体用 `users.id` 加平台哨兵；金额用 CNY 整数分。NGINX/PostgreSQL 参数/Redis 部署/k6 压测等纯基础设施属拟实施示例，本机无 Docker 未落地。
+
 ## 0.0.1-beta.14 — 2026-10-16
 
 批量补齐资料发现、账号安全、本人治理进度与安全运营；收口工作区已有 beta14 改动，继续沿用现有模块、权限和事件机制。

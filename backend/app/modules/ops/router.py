@@ -15,10 +15,11 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.deps import get_db, get_current_user
 from app.core.enums import AccountStatus, Role
 from app.core.pagination import CursorPage
-from app.core.permissions import AUDIT_VIEW, OPS_VIEW, USER_SUSPEND, require
+from app.core.permissions import AUDIT_VIEW, METRICS_VIEW, OPS_VIEW, USER_SUSPEND, require
 from app.modules.ops import accounts, personal
 from app.modules.ops import service
 from app.modules.ops.schemas import (
+    MetricsOut,
     OpsAlertsOut,
     SecurityOverviewOut,
     WorkbenchOut,
@@ -54,6 +55,15 @@ async def get_security_overview(
 ) -> SecurityOverviewOut:
     """安全运营视图：近 1 小时登录失败 Top、近 24 小时新 IP 登录、近 7 天下载速率告警审计的只读聚合。"""
     return await service.security_overview(db)
+
+
+@router.get("/admin/metrics", response_model=MetricsOut)
+async def get_metrics(
+    user: "User" = Depends(require(METRICS_VIEW)),
+    db: AsyncSession = Depends(get_db),
+) -> MetricsOut:
+    """只读 SLO 指标：连接池预算、缓存统计、事件/任务积压与慢查询阈值（高并发专项 §13）。"""
+    return await service.metrics_summary(db)
 
 
 @router.get("/me/overview", response_model=personal.PersonalOverview)

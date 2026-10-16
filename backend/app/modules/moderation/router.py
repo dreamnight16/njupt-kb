@@ -167,6 +167,7 @@ async def decide_review(
     request_id: str = Depends(get_request_id),
     db: AsyncSession = Depends(get_db),
 ) -> ModerationDecisionOut:
+    """给出审核决定：通过（approve）、补证（needs_info）或拒绝（reject），需 content.review。"""
     decision = await service.decide(
         db,
         review_id=review_id,
