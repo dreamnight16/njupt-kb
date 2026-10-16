@@ -44,7 +44,7 @@ from app.core.security import (
     verify_password,
 )
 from app.modules.identity.models import AuthToken, Session, User, UserIdentity, UserProfile
-from app.modules.identity.schemas import MeResponse, SessionItem
+from app.modules.identity.schemas import ActionMessage, MeResponse, SessionItem
 
 logger = logging.getLogger("app.identity")
 
@@ -710,3 +710,288 @@ async def update_avatar(
         request_id=request_id,
     )
     return await me_summary(db, user=user)
+
+
+# --- 账号注销与个人数据导出（§9「注销账号」）-------------------------------------------------
+
+# 固定确认词：防止误触的显式二次确认，匹配失败按业务错误拒绝。
+DELETION_CONFIRM_PHRASE = "注销账号"
+# 注销立即生效（不可登录、公开资料匿名化）；邮箱与审计/业务事实按本保留期继续保留，
+# 供申诉与对账，期满由运维清理。本轮不实现自动清理定时任务，只落地字段与说明（§9）。
+ACCOUNT_RETENTION_DAYS = 30
+
+
+def _iso(value: datetime | None) -> str | None:
+    return value.isoformat() if value is not None else None
+
+
+async def delete_account(
+    db: AsyncSession,
+    *,
+    user: User,
+    password: str,
+    confirm: str,
+    request_id: str | None,
+) -> ActionMessage:
+    """注销账号：校验密码与确认词，匿名化个人资料并撤销全部会话。
+
+    业务事实（上传资源、评论、评分、审计日志、事件记录）一律保留，评论不匿名化，
+    仅靠 `display_name_of` 在对外展示时自然显示为「已注销用户」（§9）。
+    """
+    if user.status == AccountStatus.DELETED:
+        raise Conflict("账号已注销", code="ACCOUNT_ALREADY_DELETED")
+    if confirm.strip() != DELETION_CONFIRM_PHRASE:
+        raise InvalidInput(
+            f"请输入确认词「{DELETION_CONFIRM_PHRASE}」以确认注销",
+            code="CONFIRMATION_REQUIRED",
+        )
+    # 复用项目既有密码校验实现，不另发明哈希逻辑；审计不记录密码。
+    if not verify_password(password, user.password_hash):
+        await record_audit(
+            db,
+            action="identity.account_deletion_failed",
+            object_type="user",
+            object_id=user.id,
+            actor_id=user.id,
+            reason="password_mismatch",
+            request_id=request_id,
+        )
+        raise Forbidden("密码不正确", code="PASSWORD_INCORRECT")
+
+    now = _now()
+    user.status = AccountStatus.DELETED.value
+    user.deleted_at = now
+
+    # 匿名化个人资料；邮箱保留在保留期内，故不改动 users.email。
+    profile = getattr(user, "profile", None)
+    if profile is not None:
+        profile.display_name = "已注销用户"
+        profile.avatar_url = None
+        profile.gender = None
+        profile.bio = None
+        profile.college_id = None
+        profile.major_id = None
+        profile.enrollment_year = None
+        profile.preferences = {}
+
+    revoked = await revoke_all_sessions(db, user.id, reason="account_deleted")
+
+    await record_audit(
+        db,
+        action="identity.account_deleted",
+        object_type="user",
+        object_id=user.id,
+        actor_id=user.id,
+        after={
+            "status": user.status,
+            "deleted_at": now.isoformat(),
+            "revoked_sessions": revoked,
+            "retention_days": ACCOUNT_RETENTION_DAYS,
+        },
+        request_id=request_id,
+    )
+    return ActionMessage(
+        message=(
+            "账号已注销：登录会话已全部撤销，公开资料已匿名化。"
+            f"邮箱与审计/业务事实将保留 {ACCOUNT_RETENTION_DAYS} 天，供申诉与对账。"
+        )
+    )
+
+
+async def export_my_data(db: AsyncSession, *, user: User) -> dict:
+    """导出本人数据的 JSON 结构（§9）。
+
+    只含本人数据：不含文件字节、不含签名 URL、不含他人评论或他人会话。
+    注销账号不可导出（对外由 get_current_user 拦截，这里再兜底一次）。
+    """
+    if user.status == AccountStatus.DELETED:
+        raise Forbidden("账号已注销，无法导出数据")
+
+    # 跨模块模型只在函数体内局部导入，避免循环依赖（docs/ARCHITECTURE.md §2）。
+    from app.modules.content.models import Resource, ResourceVersion
+    from app.modules.interaction.models import (
+        Comment,
+        Favorite,
+        Follow,
+        Rating,
+        ResourceRequest,
+        ResourceRequestResponse,
+    )
+    from app.modules.interaction.service import comment_status
+    from app.modules.notification.models import Notification
+
+    profile = getattr(user, "profile", None)
+
+    async def _all(stmt) -> list:
+        return list((await db.execute(stmt)).scalars().all())
+
+    follow_rows = await _all(
+        select(Follow).where(Follow.user_id == user.id).order_by(Follow.created_at)
+    )
+    favorite_rows = await _all(
+        select(Favorite).where(Favorite.user_id == user.id).order_by(Favorite.created_at)
+    )
+    rating_rows = await _all(
+        select(Rating).where(Rating.user_id == user.id).order_by(Rating.created_at)
+    )
+    comment_rows = await _all(
+        select(Comment).where(Comment.user_id == user.id).order_by(Comment.created_at)
+    )
+    notification_rows = await _all(
+        select(Notification)
+        .where(Notification.user_id == user.id)
+        .order_by(Notification.created_at)
+    )
+    request_rows = await _all(
+        select(ResourceRequest)
+        .where(ResourceRequest.requester_id == user.id)
+        .order_by(ResourceRequest.created_at)
+    )
+    response_rows = await _all(
+        select(ResourceRequestResponse)
+        .where(ResourceRequestResponse.submitted_by == user.id)
+        .order_by(ResourceRequestResponse.created_at)
+    )
+    session_rows = await _all(
+        select(Session).where(Session.user_id == user.id).order_by(Session.created_at)
+    )
+
+    resource_rows = await _all(
+        select(Resource).where(Resource.owner_id == user.id).order_by(Resource.created_at)
+    )
+    latest_version: dict[uuid.UUID, ResourceVersion] = {}
+    if resource_rows:
+        version_rows = await _all(
+            select(ResourceVersion)
+            .where(ResourceVersion.resource_id.in_([row.id for row in resource_rows]))
+            .order_by(ResourceVersion.version_no.desc())
+        )
+        for version in version_rows:
+            latest_version.setdefault(version.resource_id, version)
+
+    return {
+        "exported_at": _now().isoformat(),
+        "retention": {
+            "policy": "deleted_account",
+            "retention_days": ACCOUNT_RETENTION_DAYS,
+            "note": "注销立即生效；邮箱与审计/业务事实按保留期保留，供申诉与对账，期满由运维清理",
+        },
+        "account": {
+            "id": str(user.id),
+            "email": user.email,
+            "role": user.role,
+            "status": user.status,
+            "display_name": display_name_of(user),
+            "email_verified": user.email_verified_at is not None,
+            "email_verified_at": _iso(user.email_verified_at),
+            "deleted_at": _iso(user.deleted_at),
+            "created_at": _iso(user.created_at),
+        },
+        "profile": {
+            "display_name": profile.display_name if profile else None,
+            "avatar_url": profile.avatar_url if profile else None,
+            "gender": profile.gender if profile else None,
+            "bio": profile.bio if profile else None,
+            "college_id": str(profile.college_id) if profile and profile.college_id else None,
+            "major_id": str(profile.major_id) if profile and profile.major_id else None,
+            "enrollment_year": profile.enrollment_year if profile else None,
+            "preferences": profile.preferences if profile else {},
+        },
+        "follows": [
+            {
+                "target_type": row.target_type,
+                "target_id": str(row.target_id),
+                "created_at": _iso(row.created_at),
+            }
+            for row in follow_rows
+        ],
+        "favorites": [
+            {"resource_id": str(row.resource_id), "created_at": _iso(row.created_at)}
+            for row in favorite_rows
+        ],
+        "ratings": [
+            {
+                "resource_id": str(row.resource_id),
+                "version_id": str(row.version_id),
+                "score": row.score,
+                "created_at": _iso(row.created_at),
+            }
+            for row in rating_rows
+        ],
+        "comments": [
+            {
+                "id": str(row.id),
+                "resource_id": str(row.resource_id),
+                "parent_id": str(row.parent_id) if row.parent_id else None,
+                "body": row.body,
+                "status": comment_status(row),
+                "withdrawn_at": _iso(row.withdrawn_at),
+                "is_hidden": row.is_hidden,
+                "created_at": _iso(row.created_at),
+            }
+            for row in comment_rows
+        ],
+        "resources": [
+            {
+                "id": str(row.id),
+                "course_id": str(row.course_id),
+                "resource_type": row.resource_type,
+                "publication_status": row.publication_status,
+                "title": latest_version[row.id].title if row.id in latest_version else None,
+                "created_at": _iso(row.created_at),
+                "updated_at": _iso(row.updated_at),
+            }
+            for row in resource_rows
+        ],
+        "notifications": [
+            {
+                "id": str(row.id),
+                "type": row.type,
+                "title": row.title,
+                "body": row.body,
+                "data": row.data,
+                "is_read": row.is_read,
+                "read_at": _iso(row.read_at),
+                "created_at": _iso(row.created_at),
+            }
+            for row in notification_rows
+        ],
+        "requests": [
+            {
+                "id": str(row.id),
+                "course_id": str(row.course_id),
+                "scope": row.scope,
+                "description": row.description,
+                "status": row.status,
+                "resolved_resource_id": (
+                    str(row.resolved_resource_id) if row.resolved_resource_id else None
+                ),
+                "created_at": _iso(row.created_at),
+                "handled_at": _iso(row.handled_at),
+            }
+            for row in request_rows
+        ],
+        "request_responses": [
+            {
+                "id": str(row.id),
+                "request_id": str(row.request_id),
+                "resource_id": str(row.resource_id),
+                "created_at": _iso(row.created_at),
+            }
+            for row in response_rows
+        ],
+        "sessions": [
+            {
+                "id": str(row.id),
+                "issued_at": _iso(row.issued_at),
+                "expires_at": _iso(row.expires_at),
+                "last_seen_at": _iso(row.last_seen_at),
+                "revoked_at": _iso(row.revoked_at),
+                "revoke_reason": row.revoke_reason,
+                "user_agent": row.user_agent,
+                "client_ip": row.client_ip,
+                "created_at": _iso(row.created_at),
+            }
+            for row in session_rows
+        ],
+    }

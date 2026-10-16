@@ -1,15 +1,18 @@
 'use client';
 
 import { useState } from 'react';
+import { useRouter } from 'next/navigation';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import toast from 'react-hot-toast';
-import { CheckCircle2, ShieldAlert } from 'lucide-react';
+import { CheckCircle2, Download, ShieldAlert } from 'lucide-react';
 
 import { Notice } from '@/components/common/Notice';
 import { Button } from '@/components/ui/Button';
 import { Input } from '@/components/ui/Input';
 import { SkeletonList } from '@/components/ui/Skeleton';
 import {
+  deleteAccount,
+  exportMyData,
   listSessions,
   requestEmailVerification,
   requestPasswordReset,
@@ -20,11 +23,18 @@ import { describeError } from '@/lib/api/client';
 import { formatDateTime } from '@/lib/utils';
 import { useAuthStore } from '@/stores/authStore';
 
+// 与后端 identity.service.DELETION_CONFIRM_PHRASE 保持一致；仅用于前端即时校验。
+const DELETION_CONFIRM_PHRASE = '注销账号';
+
 export default function SecurityPage() {
   const { user, setUser, logout } = useAuthStore();
+  const router = useRouter();
   const queryClient = useQueryClient();
   const [displayName, setDisplayName] = useState(user?.display_name ?? '');
   const [confirmRevoke, setConfirmRevoke] = useState<string | null>(null);
+  const [password, setPassword] = useState('');
+  const [confirmPhrase, setConfirmPhrase] = useState('');
+  const [confirmingDeletion, setConfirmingDeletion] = useState(false);
 
   const sessionsQuery = useQuery({
     queryKey: ['sessions'],
@@ -64,6 +74,39 @@ export default function SecurityPage() {
     },
     onError: (error) => toast.error(describeError(error).message),
   });
+
+  const exportMutation = useMutation({
+    mutationFn: () => exportMyData(),
+    onSuccess: ({ blob, filename }) => {
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement('a');
+      link.href = url;
+      link.download = filename;
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+      URL.revokeObjectURL(url);
+      toast.success('数据导出已开始下载');
+    },
+    onError: (error) => toast.error(describeError(error).message),
+  });
+
+  const deletionMutation = useMutation({
+    mutationFn: () => deleteAccount({ password, confirm: confirmPhrase.trim() }),
+    onSuccess: (result) => {
+      toast.success(result.message);
+      // 服务端已撤销全部会话；清空本地登录态并回到首页。
+      setUser(null);
+      setPassword('');
+      setConfirmPhrase('');
+      setConfirmingDeletion(false);
+      router.push('/');
+    },
+    onError: (error) => toast.error(describeError(error).message),
+  });
+
+  const canSubmitDeletion =
+    password.length > 0 && confirmPhrase.trim() === DELETION_CONFIRM_PHRASE;
 
   if (!user) return null;
 
@@ -223,16 +266,98 @@ export default function SecurityPage() {
         <h2 id="danger" className="dn-display text-2xl">
           注销与退出
         </h2>
-        <div className="mt-4 space-y-4">
-          <div>
-            <Button variant="secondary" onClick={() => void logout()}>
-              退出当前会话
-            </Button>
-          </div>
-          <Notice tone="warning" title="账号注销入口暂不可用">
-            后端尚未提供账号注销接口，因此这里不提供无法完成的按钮。注销涉及个人资料匿名化、
-            公开内容署名处理与审计记录保留，需要在上线前确定保留期限与导出范围后再开放。
+
+        <div className="mt-4 flex flex-wrap gap-3">
+          <Button variant="secondary" onClick={() => void logout()}>
+            退出当前会话
+          </Button>
+          <Button
+            variant="secondary"
+            onClick={() => exportMutation.mutate()}
+            isLoading={exportMutation.isPending}
+          >
+            <Download className="h-4 w-4" aria-hidden="true" />
+            导出我的数据
+          </Button>
+        </div>
+        <p className="mt-2 text-sm text-text-secondary">
+          导出内容只包含你自己的账号资料、关注与收藏、评分、评论、上传资料清单、通知、需求与会话列表，
+          不包含文件本体、下载链接或他人数据。
+        </p>
+
+        <div className="mt-6 border-t border-divider pt-6">
+          <h3 className="text-base font-medium text-text-primary">注销账号</h3>
+          <Notice tone="error" title="注销将立即生效且不可撤销">
+            注销后该账号无法登录，昵称、头像与个人资料将被匿名化，全部登录会话会被撤销；
+            你上传的资料、评论、评分与审计记录作为业务事实保留（评论不匿名化，对外仅显示「已注销用户」）。
+            邮箱与审计/业务事实在 30 天保留期内继续保留，供申诉与对账，期满由运维清理。
           </Notice>
+
+          <div className="mt-4 max-w-md space-y-4">
+            <Input
+              label="当前密码"
+              type="password"
+              autoComplete="current-password"
+              value={password}
+              onChange={(event) => setPassword(event.target.value)}
+            />
+            <Input
+              label="确认词"
+              value={confirmPhrase}
+              onChange={(event) => setConfirmPhrase(event.target.value)}
+              placeholder={`请输入「${DELETION_CONFIRM_PHRASE}」`}
+              maxLength={40}
+            />
+
+            {deletionMutation.isError && (
+              <Notice
+                tone="error"
+                title="注销未完成"
+                action={
+                  <Button
+                    variant="danger"
+                    onClick={() => deletionMutation.mutate()}
+                    isLoading={deletionMutation.isPending}
+                  >
+                    重试
+                  </Button>
+                }
+              >
+                {describeError(deletionMutation.error).message}
+              </Notice>
+            )}
+
+            {confirmingDeletion ? (
+              <div className="flex flex-wrap items-center gap-3">
+                <span className="text-sm text-text-secondary">
+                  确认注销？该操作立即生效，无法恢复。
+                </span>
+                <Button
+                  variant="danger"
+                  onClick={() => deletionMutation.mutate()}
+                  isLoading={deletionMutation.isPending}
+                  disabled={!canSubmitDeletion}
+                >
+                  确认注销
+                </Button>
+                <Button
+                  variant="ghost"
+                  onClick={() => setConfirmingDeletion(false)}
+                  disabled={deletionMutation.isPending}
+                >
+                  取消
+                </Button>
+              </div>
+            ) : (
+              <Button
+                variant="danger"
+                onClick={() => setConfirmingDeletion(true)}
+                disabled={!canSubmitDeletion}
+              >
+                注销账号
+              </Button>
+            )}
+          </div>
         </div>
       </section>
     </div>

@@ -143,3 +143,27 @@ export async function listSessions(cursor?: string | null): Promise<CursorPage<S
 export async function revokeSession(sessionId: string): Promise<void> {
   await api.delete(`/me/sessions/${sessionId}`);
 }
+
+export interface DeleteAccountRequest {
+  /** 当前密码：服务端复用既有密码校验实现，不另发明哈希逻辑。 */
+  password: string;
+  /** 固定确认词，防止误触；不匹配时服务端拒绝。 */
+  confirm: string;
+}
+
+/** 注销账号：服务端匿名化资料、撤销全部会话，业务事实保留（§9）。 */
+export async function deleteAccount(payload: DeleteAccountRequest): Promise<ActionMessage> {
+  const { data } = await api.post<ActionMessage>('/me/deletion', payload);
+  return data;
+}
+
+/** 导出本人数据的 JSON 附件（§9）。返回文件名与 Blob，由调用方触发保存。 */
+export async function exportMyData(): Promise<{ blob: Blob; filename: string }> {
+  const response = await api.get<Blob>('/me/export', { responseType: 'blob' });
+  const disposition = response.headers['content-disposition'] as string | undefined;
+  const match = disposition?.match(/filename="?([^";]+)"?/i);
+  return {
+    blob: response.data,
+    filename: match?.[1] ?? 'njupt-kb-export.json',
+  };
+}
