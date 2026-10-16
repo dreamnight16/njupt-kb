@@ -68,7 +68,6 @@ class Beta11RateLimitTests(unittest.IsolatedAsyncioTestCase):
             await connection.run_sync(Base.metadata.create_all)
         self.factory = async_sessionmaker(self.engine, expire_on_commit=False)
         self.db = self.factory()
-        now = datetime.now(timezone.utc)
         self.owner = User(
             email="owner@example.org",
             password_hash=hash_password("owner-pw"),
@@ -148,12 +147,12 @@ class Beta11RateLimitTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(
             ratelimit.resolve_subject(None, None, request), ("ip", "203.0.113.7")
         )
-        # X-Forwarded-For 只信首个 hop（代理把真实客户端放首位；测试环境无代理）。
+        # 客户端伪造代理头不能更换限流桶。
         self.assertEqual(
             ratelimit.resolve_subject(
                 None, None, make_request(forwarded="198.51.100.9, 10.0.0.1")
             ),
-            ("ip", "198.51.100.9"),
+            ("ip", "203.0.113.7"),
         )
 
     async def test_tier_mapping(self):

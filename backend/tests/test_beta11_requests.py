@@ -8,7 +8,7 @@ import unittest
 from unittest.mock import patch
 
 import httpx
-from sqlalchemy import func, select
+from sqlalchemy import select
 
 from app.config import settings
 from app.core.deps import get_current_user, get_db
@@ -187,8 +187,7 @@ class Beta11Tests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(event.payload["request_id"], str(self.request_id))
         self.assertEqual(event.payload["revision"], 3)
 
-    async def test_requester_can_reopen_closed_request(self):
-        # closed 只能从 open 直接关闭；复核重开允许发起者本人重开（change_status 仅管理员可）。
+    async def test_closed_request_requires_admin_to_reopen(self):
         await requests.change_status(
             self.db,
             user=self.owner,
@@ -198,9 +197,19 @@ class Beta11Tests(unittest.IsolatedAsyncioTestCase):
             ),
             request_trace_id="beta11",
         )
+        with self.assertRaises(Forbidden):
+            await requests.reopen(
+                self.db,
+                user=self.owner,
+                request_id=self.request_id,
+                payload=RequestReopen(expected_revision=2, reason="重新寻找"),
+                request_trace_id="beta11",
+            )
+        self.other.role = "admin"
+        await self.db.flush()
         reopened = await requests.reopen(
             self.db,
-            user=self.owner,
+            user=self.other,
             request_id=self.request_id,
             payload=RequestReopen(expected_revision=2, reason="重新寻找"),
             request_trace_id="beta11",

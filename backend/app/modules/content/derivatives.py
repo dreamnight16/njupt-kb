@@ -1,8 +1,11 @@
-"""预览派生（设计文档 §13.1、§16.2、§17.1）。
+"""预览派生（设计文档 §13.1、§16.2、§17.1；prevew.md 四、五、十二）。
 
 - PDF → 首页或少量页（`settings.PREVIEW_MAX_PAGES`）的受限 PDF + 首页缩略图（pypdfium2）。
+- PDF / PNG / JPEG → 第一页水印图片预览（WebP）：只渲染第一页、限定宽度、低可见度
+  斜向重复水印（prevew.md 五、十二）；浏览器拿到的是 page1.webp，不是完整 PDF。
 - PNG/JPEG → 缩略图（Pillow）。
-- DOCX/PPTX → 调 `settings.LIBREOFFICE_BIN` 无头转换（临时目录、超时）后再取首页缩略图。
+- DOCX/PPTX → 调 `settings.LIBREOFFICE_BIN` 无头转换（临时目录、超时）后再取首页缩略图；
+  本轮不做图片化，维持受限 PDF 链路（见 `build_watermarked_preview` 说明）。
 - 转换失败由调用方记录 `FileDerivative.status=failed`，不改变原件审核事实，不假显示“预览就绪”。
 - 隐私遮盖、纠错、水印、格式转换都生成派生文件或新版本，不修改原始文件（§16.2）。
 """
@@ -14,6 +17,10 @@ import os
 import subprocess
 from dataclasses import dataclass
 from pathlib import Path
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from PIL import Image
 
 from app.config import settings
 from app.core.enums import DerivativeKind
@@ -164,3 +171,119 @@ async def build_derivatives(
     except Exception as exc:  # noqa: BLE001 - 统一为派生失败
         raise DerivativeError(f"转换异常：{type(exc).__name__}") from exc
     raise DerivativeError(f"不支持的预览格式：{detected_mime}")
+
+
+# --------------------------------------------------------------------------- #
+# 第一页水印图片预览（prevew.md 四、五、十二）
+# --------------------------------------------------------------------------- #
+def _apply_watermark(image: "Image.Image", text: str) -> "Image.Image":
+    """叠加低可见度斜向重复水印（prevew.md 十二）。
+
+    平铺而非只放角落：裁剪边缘去不掉水印；透明度受 `PREVIEW_WATERMARK_OPACITY`
+    控制，不破坏阅读但可追溯。字体用内置 `load_default()`，不依赖系统字体文件。
+    """
+    from PIL import Image, ImageDraw, ImageFont
+
+    tile = Image.new("RGBA", (360, 96), (0, 0, 0, 0))
+    draw = ImageDraw.Draw(tile)
+    draw.text(
+        (18, 28),
+        text,
+        font=ImageFont.load_default(),
+        fill=(0, 0, 0, settings.PREVIEW_WATERMARK_OPACITY),
+    )
+    rotated = tile.rotate(30, expand=True, resample=Image.Resampling.BICUBIC)
+    layer = Image.new("RGBA", image.size, (0, 0, 0, 0))
+    for top in range(0, image.height, rotated.height):
+        for left in range(0, image.width, rotated.width):
+            layer.alpha_composite(rotated, (left, top))
+    return Image.alpha_composite(image, layer)
+
+
+def _watermarked_webp(
+    image: "Image.Image", workdir: Path, *, watermark_text: str
+) -> DerivativeArtifact | None:
+    """加水印并保存为 WebP；渲染或写入失败返回 None（调用方回退既有预览）。"""
+    try:
+        watermarked = _apply_watermark(image.convert("RGBA"), watermark_text)
+        target = workdir / "preview.webp"
+        # 图片由服务端重新渲染/缩放生成，不携带原件元数据（prevew.md 四）。
+        watermarked.convert("RGB").save(
+            target, format="WEBP", quality=settings.PREVIEW_IMAGE_QUALITY
+        )
+    except Exception:  # noqa: BLE001 - 生成失败回退既有预览，不阻断预览链路（§13.1）
+        return None
+    return DerivativeArtifact(DerivativeKind.WATERMARKED_PREVIEW, target, "image/webp", 1)
+
+
+def _pdf_first_page_image(
+    source: Path, workdir: Path, watermark_text: str
+) -> DerivativeArtifact | None:
+    """PDF 只渲染第一页为限定宽度图片（prevew.md 五、六：不原尺寸输出）。
+
+    浏览器拿到的是 page1.webp，不是完整 PDF——权限隔离由服务端渲染保证，
+    不是前端隐藏后续页。
+    """
+    import pypdfium2 as pdfium
+
+    document = None
+    try:
+        document = pdfium.PdfDocument(str(source))
+        if len(document) == 0:
+            return None
+        page = document[0]
+        width_pt, height_pt = page.get_size()
+        if min(width_pt, height_pt) <= 0:
+            return None
+        # 同时限制长边，避免极长页面按宽度缩放后分配巨量位图内存。
+        scale = settings.PREVIEW_IMAGE_WIDTH / max(width_pt, height_pt)
+        bitmap = page.render(scale=scale)
+        try:
+            image = bitmap.to_pil().copy()
+        finally:
+            bitmap.close()
+            page.close()
+    except Exception:  # noqa: BLE001 - 渲染失败回退既有预览
+        return None
+    finally:
+        # pdfium 持有源文件句柄，必须显式关闭，否则临时目录清理会被文件锁阻塞（Windows）。
+        if document is not None:
+            document.close()
+    return _watermarked_webp(image, workdir, watermark_text=watermark_text)
+
+
+def _image_first_page(
+    source: Path, workdir: Path, watermark_text: str
+) -> DerivativeArtifact | None:
+    """PNG/JPEG 原件：缩放后作为图片预览（水印同样叠加）。"""
+    from PIL import Image
+
+    try:
+        with Image.open(source) as opened:
+            image = opened.convert("RGBA")
+            image.thumbnail((settings.PREVIEW_IMAGE_WIDTH, settings.PREVIEW_IMAGE_WIDTH))
+    except Exception:  # noqa: BLE001 - 解码失败回退既有预览
+        return None
+    return _watermarked_webp(image, workdir, watermark_text=watermark_text)
+
+
+async def build_watermarked_preview(
+    source: Path, *, detected_mime: str, workdir: Path, watermark_text: str
+) -> DerivativeArtifact | None:
+    """生成第一页水印图片预览（WebP）；无法生成时返回 None（prevew.md 四、五、十二）。
+
+    调用方据此回退到既有 preview_pdf / thumbnail 预览，不让预览链路失败。
+    DOCX/PPTX 不在本函数处理：维持现有 LibreOffice 受限 PDF 链路。
+    渲染是 CPU 阻塞操作：放线程池并受 `DERIVATIVE_TIMEOUT_SECONDS` 约束。
+    """
+    builder = {
+        PDF_MIME: _pdf_first_page_image,
+        PNG_MIME: _image_first_page,
+        JPEG_MIME: _image_first_page,
+    }.get(detected_mime)
+    if builder is None:
+        return None
+    try:
+        return await _run_blocking(builder, source, workdir, watermark_text)
+    except Exception:  # noqa: BLE001 - 超时/异常回退既有预览，不阻断预览链路
+        return None

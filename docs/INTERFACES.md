@@ -1,5 +1,14 @@
 # 跨模块接口声明
 
+## beta11 增补
+
+- `content.service.ensure_watermarked_preview(db, *, source_file, user)`：仅在 access 已授权后调用，为已扫描 PDF/PNG/JPEG 生成或复用当前用户第一页 WebP；完整 HMAC 区分用户对象，显示水印只用短码和生成日期。关闭、匿名、不支持格式或转换失败返回 `None`；存储故障由 access 回退已有受限派生文件，不改变原件与下载权益。
+- `PreviewGrantResult.preview_type`：`image`（第一页水印图）、`pdf`（受限 PDF）、`thumbnail`（缩略图）。Office 与匿名预览沿用受限派生文件，本轮不代表所有格式均已纯图片化。
+- `ratelimit.deps.rate_limit(action)`：按用户/有效会话/ASGI 客户端地址计数，独立事务；用于登录、搜索、课程列表/详情、资料详情、预览/下载授予、上传。角色限额通过 `RATE_LIMIT_*` 覆盖，超限响应 `429 RATE_LIMITED` 与 `Retry-After`。与下载业务硬配额分别生效。
+- 代理地址由 ASGI 服务器仅对已配置的受信代理解析；应用不直接采信 `X-Forwarded-For`。部署须正确配置 `FORWARDED_ALLOW_IPS`，不能用任意来源信任代替真实入口验收。
+- `POST /requests/{id}/reopen`：`expected_revision` 与 1—500 字非空 `reason`；已解决可由发起者或管理员重开，已关闭仍仅管理员。成功回到 `open`、清空解决资料、修订号递增，事务内审计并复用 `request.updated`；冲突返回 `409 STALE_REVISION`。
+- 需求详情/列表增加 `resolved_resource_accessible`，并保留 `resolution_available`；按查看者权限解析，不可访问时遮蔽解决资源 ID 与标题，不自动重开。前端缓存按身份隔离。
+
 ## beta3 接续增补
 
 - `interaction.service.list_corrections(db, *, status, cursor, limit)`：管理端纠错工单列表，与 `list_my_corrections` 的区别只是不限定提交人。

@@ -1,5 +1,13 @@
 # 南邮知识库 — 生产部署指南
 
+## beta11 升级补充
+
+升级前执行 `alembic upgrade head`，当前迁移链到 `0008_beta11_ratelimit`。API 启动依赖新增计数表，不能先启动新应用再补迁移。
+
+生产 `.env` 必须填写 `FORWARDED_ALLOW_IPS`：实际 Nginx 代理 IP 或其专用可信网段，逗号分隔，不使用 `*`。Compose 未填写时拒绝启动；API 不映射公网端口。当前 Nginx 按公网入口配置覆盖 XFF；若外层还有 CDN/LB，须按实际链路配置可信 real-IP 来源后再验收，不能照抄客户端自带头。
+
+上线前分别用两种来源 IP、同校园出口下的两个登录账号验证计数隔离，确认超限得到 `429` 与 `Retry-After`；再验证真实 PDF/Office 转换、存储及扫描。限流数值通过 `RATE_LIMIT_*` 角色字典配置，与下载业务配额独立。本地测试、YAML 检查及离线迁移 SQL 不代表这些生产验收通过。
+
 > beta3 更新：当前服务名为 `api`、`web`、`postgres`、`worker`、`beat`、`redis`、`minio`、`clamav`。
 > 下文历史说明保留供迁移参考；实际部署以本节和当前 Compose 为准，不执行旧版 `backend`、`db`、`seed.py` 命令。
 

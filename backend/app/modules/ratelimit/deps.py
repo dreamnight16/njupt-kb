@@ -10,6 +10,7 @@
 
 from __future__ import annotations
 
+from collections.abc import AsyncIterator
 from datetime import datetime, timezone
 from typing import Any
 
@@ -46,7 +47,7 @@ async def get_optional_session(
     return session
 
 
-async def get_counter_db() -> AsyncSession:
+async def get_counter_db() -> AsyncIterator[AsyncSession]:
     """限流计数专用会话：独立事务提交，不受业务请求回滚影响。"""
     async with async_session_factory() as session:
         yield session

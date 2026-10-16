@@ -21,6 +21,7 @@ from app.core import idempotency as idem
 from app.core.audit import record_audit
 from app.core.enums import (
     Capability,
+    DerivativeKind,
     FilePurpose,
     GrantStatus,
     Role,
@@ -187,23 +188,42 @@ async def issue_preview_grant(
     version_id: uuid.UUID,
     request_id: str,
 ) -> PreviewGrantResult:
-    """获得允许的预览访问凭证；只签发派生产物的短期 URL。"""
+    """获得允许的预览访问凭证；只签发派生产物的短期 URL。
+
+    优先级（prevew.md 五、十二）：按用户生成/复用的第一页水印图片（WebP）→
+    受限预览 PDF → 缩略图。权限判定不变：未获授权者仍由 authorize 拒绝。
+    """
     await authorize(
         db, user=user, resource_id=resource_id, version_id=version_id, capability=Capability.PREVIEW
     )
 
-    from app.modules.content.service import get_version
+    from app.modules.content.service import ensure_watermarked_preview, get_version
 
     version = await get_version(db, version_id)
     if version.preview_disabled:
         raise NotFound("作者已关闭该版本的预览", code="PREVIEW_DISABLED")
     _, resource_file = await _resolve_file(db, version_id=version_id, file_id=None)
 
-    derivative = await _find_preview_derivative(db, source_file_id=resource_file.id)
-    if derivative is None:
-        # 不假显示"预览就绪"（§13.1）
-        raise NotFound("该内容的预览尚未就绪", code="PREVIEW_NOT_READY")
-    derivative_id, storage_key = derivative
+    from app.core.errors import DependencyUnavailable
+
+    try:
+        watermarked = await ensure_watermarked_preview(db, source_file=resource_file, user=user)
+    except (DependencyUnavailable, NotFound, OSError):
+        # 原件读取/派生上传失败时仍可使用已经就绪的受限预览。
+        watermarked = None
+    if watermarked is not None:
+        derivative_id, storage_key, preview_type = (
+            watermarked.id,
+            watermarked.storage_key,
+            "image",
+        )
+    else:
+        found = await _find_preview_derivative(db, source_file_id=resource_file.id)
+        if found is None:
+            # 不假显示"预览就绪"（§13.1）
+            raise NotFound("该内容的预览尚未就绪", code="PREVIEW_NOT_READY")
+        derivative_id, storage_key, kind = found
+        preview_type = _preview_type_of(kind)
 
     signed = await storage.presign_download(storage_key, bucket=settings.S3_BUCKET_PRIVATE)
     grant = PreviewGrant(
@@ -224,6 +244,7 @@ async def issue_preview_grant(
         url_expires_at=signed.expires_at,
         file_name=resource_file.original_name,
         version_no=version.version_no,
+        preview_type=preview_type,
     )
 
 
@@ -714,21 +735,37 @@ async def _rights_basis(db: AsyncSession, version_id: uuid.UUID) -> str | None:
     return str(row[0]) if row is not None and row[0] is not None else None
 
 
+# 派生产物 → 前端展示形态（prevew.md 五：浏览器拿到的必须是图片而非完整 PDF）。
+_PREVIEW_TYPE_BY_KIND = {
+    DerivativeKind.WATERMARKED_PREVIEW.value: "image",
+    DerivativeKind.PREVIEW_PDF.value: "pdf",
+    DerivativeKind.THUMBNAIL.value: "thumbnail",
+}
+
+
+def _preview_type_of(kind: str) -> str:
+    """派生产物类型映射；未知类型保守按 pdf 处理（维持既有 iframe/链接行为）。"""
+    return _PREVIEW_TYPE_BY_KIND.get(kind, "pdf")
+
+
 async def _find_preview_derivative(
     db: AsyncSession, *, source_file_id: uuid.UUID
-) -> tuple[uuid.UUID, str] | None:
-    """查找已就绪的预览派生产物（§17.1：预览是 FileDerivative，不是另一个内容版本）。
+) -> tuple[uuid.UUID, str, str] | None:
+    """查找已就绪的回退预览派生产物（§17.1：预览是 FileDerivative，不是另一个内容版本）。
 
     跨模块只读：按冻结表名与列名查询，不导入 content 的模型类。
+
+    `watermarked_preview` 不在此查找：它是按用户生成的（prevew.md 十二），
+    由调用方经 `ensure_watermarked_preview` 按当前用户生成/复用，
+    避免把某个用户的水印预览签发给其他用户。
     """
     row = (
         await db.execute(
             text(
-                "SELECT id, storage_key FROM file_derivatives "
+                "SELECT id, storage_key, kind FROM file_derivatives "
                 "WHERE source_file_id = :source_file_id AND status = 'ready' "
-                "AND kind IN ('watermarked_preview', 'preview_pdf', 'thumbnail') "
-                "ORDER BY CASE kind WHEN 'watermarked_preview' THEN 0 "
-                "WHEN 'preview_pdf' THEN 1 ELSE 2 END, created_at DESC "
+                "AND kind IN ('preview_pdf', 'thumbnail') "
+                "ORDER BY CASE kind WHEN 'preview_pdf' THEN 0 ELSE 1 END, created_at DESC "
                 "LIMIT 1"
             ).bindparams(bindparam("source_file_id", type_=Uuid())),
             {"source_file_id": source_file_id},
@@ -738,7 +775,7 @@ async def _find_preview_derivative(
         return None
     # SQLite 的 uuid 列以无连字符字符串存储，裸 SQL 读回是 str；统一成 UUID 对象，
     # 与 PostgreSQL native uuid 驱动的返回一致，便于后续写入 uuid 列。
-    return uuid.UUID(str(row[0])), str(row[1])
+    return uuid.UUID(str(row[0])), str(row[1]), str(row[2])
 
 
 async def _is_school_verified(db: AsyncSession, user: "User") -> bool:

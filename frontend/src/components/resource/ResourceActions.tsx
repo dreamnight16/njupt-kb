@@ -10,7 +10,8 @@ import { CoursePicker } from '@/components/catalog/CoursePicker';
 import { RESOURCE_TYPE_LABELS, RESOURCE_TYPE_ORDER, type ResourceType } from '@/lib/api/types';
 import { Button } from '@/components/ui/Button';
 import { Modal } from '@/components/ui/Modal';
-import { createDownloadGrant, createPreviewGrant } from '@/lib/api/access';
+import { Skeleton } from '@/components/ui/Skeleton';
+import { createDownloadGrant, createPreviewGrant, type PreviewGrantResult } from '@/lib/api/access';
 import { describeError } from '@/lib/api/client';
 import type { FileOut } from '@/lib/api/content';
 import {
@@ -56,6 +57,7 @@ export function ResourceActions({
   publicationStatus,
   previewAvailable,
   files,
+  resourceTitle,
 }: {
   resourceId: string;
   versionId: string | null;
@@ -63,6 +65,8 @@ export function ResourceActions({
   publicationStatus: PublicationStatus;
   previewAvailable: boolean;
   files: FileOut[];
+  /** 资料标题：用于第一页图片预览的 alt 文案。 */
+  resourceTitle?: string;
 }) {
   const { status: sessionStatus } = useAuthStore();
   const authed = sessionStatus === 'authenticated';
@@ -71,6 +75,9 @@ export function ResourceActions({
   const [pendingFileId, setPendingFileId] = useState<string | null>(null);
   const [previewing, setPreviewing] = useState(false);
   const [previewUrl, setPreviewUrl] = useState<string | null>(null);
+  const [previewType, setPreviewType] = useState<PreviewGrantResult['preview_type']>('pdf');
+  const [previewImageLoading, setPreviewImageLoading] = useState(false);
+  const [previewImageFailed, setPreviewImageFailed] = useState(false);
   const downloadKeys = useRef(new Map<string, string>());
   const [favorited, setFavorited] = useState<boolean | null>(null);
   const [favoritePending, setFavoritePending] = useState(false);
@@ -136,6 +143,9 @@ export function ResourceActions({
     try {
       const grant = await createPreviewGrant(resourceId, versionId);
       setPreviewUrl(grant.preview_url);
+      setPreviewType(grant.preview_type ?? 'pdf');
+      setPreviewImageLoading(true);
+      setPreviewImageFailed(false);
       toast.success(`预览链接有效期至 ${formatDateTime(grant.url_expires_at)}`);
     } catch (error) {
       toast.error(describeError(error).message);
@@ -192,8 +202,37 @@ export function ResourceActions({
   return (
     <div className="space-y-6">
       <Modal isOpen={!!previewUrl} onClose={() => setPreviewUrl(null)} title="资料预览">
-        {previewUrl && <><iframe src={previewUrl} title="获准访问的资料预览" className="h-[65vh] w-full" />
-          <a href={previewUrl} target="_blank" rel="noopener noreferrer" className="mt-3 inline-block underline">在新窗口查看</a></>}
+        {previewUrl && (
+          <>
+            {previewType === 'image' ? (
+              previewImageFailed ? (
+                <Notice tone="error" title="预览图片加载失败">
+                  短期链接可能已过期，请关闭后重新点击「查看预览」。
+                </Notice>
+              ) : (
+                <div>
+                  {previewImageLoading && <Skeleton className="h-[65vh] w-full" />}
+                  {/* 第一页图片预览：服务端只渲染第一页并加水印，浏览器拿到的不是完整 PDF（prevew.md 五）。 */}
+                  {/* Signed private URL must bypass the shared image optimizer. */}
+                  {/* eslint-disable-next-line @next/next/no-img-element */}
+                  <img
+                    src={previewUrl}
+                    alt={resourceTitle ? `${resourceTitle} 第一页预览` : '资料第一页预览'}
+                    onLoad={() => setPreviewImageLoading(false)}
+                    onError={() => {
+                      setPreviewImageLoading(false);
+                      setPreviewImageFailed(true);
+                    }}
+                    className="block max-h-[65vh] w-full object-contain"
+                  />
+                </div>
+              )
+            ) : (
+              <iframe src={previewUrl} title="获准访问的资料预览" className="h-[65vh] w-full" />
+            )}
+            <a href={previewUrl} target="_blank" rel="noopener noreferrer" className="mt-3 inline-block underline">在新窗口查看</a>
+          </>
+        )}
       </Modal>
       {publicationStatus !== 'published' && (
         <Notice tone="warning" title="该资料当前不是已发布状态">

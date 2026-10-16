@@ -15,13 +15,18 @@ class PreviewGrantRequest(BaseModel):
 
 
 class PreviewGrantResult(BaseModel):
-    """预览凭证响应：仅提供派生产物的短期访问 URL。"""
+    """预览凭证响应：仅提供派生产物的短期访问 URL。
+
+    `preview_type` 指明签发的派生形态（prevew.md 五）：
+    image=第一页水印 WebP 图片；pdf=受限预览 PDF；thumbnail=缩略图。
+    """
 
     grant_id: uuid.UUID
     preview_url: str
     url_expires_at: datetime
     file_name: str
     version_no: int
+    preview_type: str
 
 
 class DownloadGrantRequest(BaseModel):

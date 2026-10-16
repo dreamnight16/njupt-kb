@@ -45,6 +45,7 @@ async def create_preview_grant(
     user=Depends(get_optional_user),
     db: AsyncSession = Depends(get_db),
     request_id: str = Depends(get_request_id),
+    _rl: None = Depends(rate_limit("resource")),
 ) -> PreviewGrantResult:
     rid = parse_uuid(resource_id, "resource_id")
     return await service.issue_preview_grant(

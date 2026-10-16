@@ -9,6 +9,9 @@
 
 任务处理入口（供 jobs 模块的 FILE_SCAN / FILE_DERIVE 处理器调用）：
     process_file_scan(db, file_id=...) / process_file_derive(db, file_id=...)
+
+按用户水印预览（prevew.md 五、十二，供 access 预览授予调用）：
+    ensure_watermarked_preview(db, source_file=..., user=...)
 """
 
 from __future__ import annotations
@@ -52,12 +55,13 @@ from app.core.enums import (
 from app.core.errors import Conflict, Forbidden, InvalidInput, NotFound
 from app.core.events import emit_event
 from app.core.pagination import decode_cursor, encode_cursor, normalize_page_size
-from app.core.permissions import RESOURCE_PUBLISH, RESOURCE_REVIEW, RESOURCE_WITHDRAW, has_permission
+from app.core.permissions import RESOURCE_PUBLISH, RESOURCE_REVIEW, has_permission
 from app.core.storage import build_storage_key, storage
 from app.modules.content.derivatives import (
     PROCESSOR_VERSION,
     DerivativeError,
     build_derivatives,
+    build_watermarked_preview,
     primary_kind,
 )
 from app.modules.content.models import (
@@ -71,7 +75,13 @@ from app.modules.content.models import (
     UploadSession,
     VersionFile,
 )
-from app.modules.content.scanning import ScanOutcome, scan_quarantined_object
+from app.modules.content.scanning import (
+    JPEG_MIME,
+    PDF_MIME,
+    PNG_MIME,
+    ScanOutcome,
+    scan_quarantined_object,
+)
 from app.modules.content.schemas import (
     FileOut,
     PublicationOut,
@@ -1280,3 +1290,95 @@ async def process_file_derive(db: AsyncSession, *, file_id: uuid.UUID) -> Deriva
             payload={"file_id": str(file.id), "kinds": [item.kind.value for item in artifacts]},
         )
         return DerivativeStatus.READY
+
+
+# --------------------------------------------------------------------------- #
+# 按用户水印预览（prevew.md 五、十二）
+# --------------------------------------------------------------------------- #
+def user_short_code(user_id: uuid.UUID, *, length: int = 8) -> str:
+    """用户水印短码：HMAC-SHA256(SECRET_KEY, user_id) 前 8 位十六进制。
+
+    不用 UUID 前缀：任何人拿到短码都无法对着用户表枚举反查本人（prevew.md 十二）；
+    复用现有 SECRET_KEY，不引入新的密钥配置。
+    """
+    import hashlib
+    import hmac
+
+    digest = hmac.new(settings.SECRET_KEY.encode("utf-8"), user_id.bytes, hashlib.sha256)
+    return digest.hexdigest()[:length].upper()
+
+
+async def ensure_watermarked_preview(
+    db: AsyncSession, *, source_file: ResourceFile, user
+) -> FileDerivative | None:
+    """为指定用户生成/复用第一页水印图片预览（prevew.md 五、十二）。
+
+    - 浏览器拿到的是 page1.webp 图片而不是完整 PDF，权限隔离由服务端渲染保证。
+    - 水印按用户：同一文件不同用户是不同 FileDerivative 行（storage_key 含用户短码），
+      不在任何公开桶放无水印原图。
+    - 开关关闭、匿名用户、DOCX/PPTX 或生成失败时返回 None，由调用方回退既有
+      preview_pdf / thumbnail 预览，不让预览链路失败。
+    """
+    if not (settings.PREVIEW_IMAGE_ENABLED and settings.PREVIEW_WATERMARK_ENABLED):
+        return None
+    if user is None:
+        # 匿名用户无法绑定用户水印，回退到既有受限预览。
+        return None
+    if source_file.scan_status != ScanStatus.PASSED.value:
+        return None
+    mime = source_file.detected_mime
+    if mime not in (PDF_MIME, PNG_MIME, JPEG_MIME):
+        # DOCX/PPTX 维持 LibreOffice 受限 PDF 链路，本轮不做图片化。
+        return None
+
+    short_code = user_short_code(user.id)
+    # 展示短码不作为所有权键，避免截断摘要碰撞后复用其他用户的水印。
+    owner_key = user_short_code(user.id, length=64)
+    existing = await db.scalar(
+        select(FileDerivative)
+        .where(
+            FileDerivative.source_file_id == source_file.id,
+            FileDerivative.kind == DerivativeKind.WATERMARKED_PREVIEW.value,
+            FileDerivative.status == DerivativeStatus.READY.value,
+            FileDerivative.storage_key.like(f"%-{owner_key}.webp"),
+        )
+        .order_by(FileDerivative.created_at.desc())
+        .limit(1)
+    )
+    if existing is not None:
+        # 已就绪：直接复用，不重复渲染。
+        return existing
+
+    watermark_text = f"U{short_code} · {_now().date().isoformat()}"
+    with tempfile.TemporaryDirectory(prefix="njupt-wm-preview-") as tmp:
+        workdir = Path(tmp)
+        source = workdir / "source"
+        with source.open("wb") as handle:
+            await storage.download_to_file(
+                source_file.storage_key, handle, bucket=settings.S3_BUCKET_PRIVATE
+            )
+        artifact = await build_watermarked_preview(
+            source, detected_mime=mime, workdir=workdir, watermark_text=watermark_text
+        )
+        if artifact is None:
+            return None
+        # 键含用户短码：同文件不同用户是不同对象（prevew.md 十二）。
+        derivative_key = f"derivatives/{uuid.uuid4().hex}-{owner_key}.webp"
+        with artifact.path.open("rb") as handle:
+            await storage.put_file(
+                derivative_key,
+                handle,
+                artifact.content_type,
+                bucket=settings.S3_BUCKET_PRIVATE,
+            )
+    row = FileDerivative(
+        source_file_id=source_file.id,
+        processor_version=PROCESSOR_VERSION,
+        kind=DerivativeKind.WATERMARKED_PREVIEW.value,
+        storage_key=derivative_key,
+        status=DerivativeStatus.READY.value,
+        page_count=artifact.page_count,
+    )
+    db.add(row)
+    await db.flush()
+    return row

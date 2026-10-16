@@ -183,7 +183,7 @@ async def change_status(
 async def reopen(db, *, user, request_id, payload, request_trace_id) -> RequestItem:
     """复核重开：解决资源失效（下架/权限收紧）后由发起者或管理员显式重开。
 
-    与 change_status 的区别：closed 也允许发起者重开；理由必填；
+    保持既有处理权限：已关闭需求仅管理员可重开；理由必填。
     只回到 open 并清空解决资源，不附带新的解决资料。
     """
     from app.modules.interaction.service import _request_item
@@ -197,6 +197,8 @@ async def reopen(db, *, user, request_id, payload, request_trace_id) -> RequestI
         raise Conflict("需求已是打开状态")
     if row.status not in ("fulfilled", "closed"):
         raise Conflict("不支持此状态流转")
+    if row.status == "closed" and not manager:
+        raise Forbidden("关闭的需求仅管理员可重新打开")
     if row.revision != payload.expected_revision:
         raise Conflict("需求已变化，请刷新后重试", code="STALE_REVISION")
     reason = payload.reason.strip()

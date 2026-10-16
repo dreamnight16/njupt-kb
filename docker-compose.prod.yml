@@ -80,8 +80,12 @@ services:
       context: ./backend
       dockerfile: Dockerfile
     command: uvicorn app.main:app --host 0.0.0.0 --port 8000 --workers 4 --proxy-headers
+    env_file:
+      - .env
     environment:
       <<: *backend-env
+      # 必须与实际反向代理地址对应；遗漏时阻止启动，避免匿名用户共用代理 IP 桶。
+      FORWARDED_ALLOW_IPS: ${FORWARDED_ALLOW_IPS:?请配置实际受信代理IP或网段，禁止使用通配符}
     depends_on:
       postgres:
         condition: service_healthy

@@ -9,15 +9,17 @@ import { SkeletonList } from '@/components/ui/Skeleton';
 import { describeError } from '@/lib/api/client';
 import { listMyCorrections, listMyRequests } from '@/lib/api/interaction';
 import { formatDateTime } from '@/lib/utils';
+import { useAuthStore } from '@/stores/authStore';
 
 export function ContributionHistory() {
+  const user = useAuthStore(s => s.user);
   const correctionsQuery = useQuery({
-    queryKey: ['my-corrections'],
+    queryKey: ['my-corrections', user?.id],
     queryFn: () => listMyCorrections(),
   });
   const requestsQuery = useInfiniteQuery({
     initialPageParam: null as string | null,
-    queryKey: ['my-requests'],
+    queryKey: ['my-requests', user?.id],
     queryFn: ({pageParam}) => listMyRequests(pageParam),
     getNextPageParam: page => page.has_more ? page.next_cursor : undefined,
   });

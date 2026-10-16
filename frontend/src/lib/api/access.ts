@@ -12,6 +12,11 @@ export interface PreviewGrantResult {
   url_expires_at: string;
   file_name: string;
   version_no: number;
+  /**
+   * 预览形态（prevew.md 五）：image=第一页水印 WebP 图片；pdf=受限预览 PDF；thumbnail=缩略图。
+   * 旧版接口或 fixture 可能不带该字段，缺省按 pdf 处理。
+   */
+  preview_type?: 'image' | 'pdf' | 'thumbnail';
 }
 
 export interface DownloadGrantResult {

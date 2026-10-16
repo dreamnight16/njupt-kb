@@ -24,7 +24,6 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import settings
 from app.core.audit import record_audit
-from app.core.deps import get_client_ip
 from app.core.errors import RateLimited
 from app.modules.ratelimit.models import TIERS, RateLimitCounter
 
@@ -66,15 +65,15 @@ def resolve_subject(
 ) -> tuple[str, str]:
     """解析限流主体：登录用户优先，其次会话，最后 IP（pachong.md §四）。
 
-    X-Forwarded-For 只取首个 hop：反向代理总是把真实客户端追加在首位，
-    攻击者自造的前缀会被代理覆盖；测试环境无代理，直接取 request.client.host。
+    使用 ASGI client 地址；代理头由服务器仅对受信代理解析，
+    应用不直接采信可由客户端伪造的 X-Forwarded-For。
     仅用 IP 做兜底——同一校园网出口下的不同用户由更优先的 user/session 区分。
     """
     if user is not None:
         return "user", str(user.id)
     if session is not None:
         return "session", str(session.id)
-    client_ip = get_client_ip(request)
+    client_ip = request.client.host if request.client else None
     return "ip", client_ip or "unknown"
 
 
@@ -119,7 +118,7 @@ async def enforce(
     now = _now()
     window_start = _window_start(now, window)
 
-    # 顺手清理两个窗口之前的过期行：window_start 上有索引，范围删除代价恒定。
+    # 用 window_start 索引定位过期窗口；清理成本随过期行数变化。
     # synchronize_session=False：删除条件含 datetime 比较，ORM 无法在会话内求值
     # （SQLite 读回的 window_start 是 naive），也不需要同步会话状态。
     await db.execute(
@@ -165,8 +164,7 @@ async def enforce(
         action=AUDIT_ACTION_BLOCKED,
         object_type="rate_limit_counter",
         actor_id=actor_id,
-        # 只记动作、主体种类与档位等非敏感信息：不记 IP 全值以外的敏感信息，
-        # 不记密码与任何会话令牌（subject 本身不写入审计）。
+        # 只记动作、主体种类与档位；不复制 subject、IP、密码或会话令牌。
         after={
             "action": action,
             "subject_kind": subject_kind,

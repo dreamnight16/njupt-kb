@@ -122,6 +122,7 @@ export default async function ResourceDetailPage({
               publicationStatus={resource.publication_status}
               previewAvailable={resource.preview_available}
               files={files}
+              resourceTitle={version?.title ?? undefined}
             />
           )}
         </div>

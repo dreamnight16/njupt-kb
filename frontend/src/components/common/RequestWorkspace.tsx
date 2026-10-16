@@ -41,7 +41,7 @@ export function RequestWorkspace({ requestId }: { requestId: string }) {
   const [reopenAction, setReopenAction] = useState<{ revision: number } | null>(null);
   const [reopenReason, setReopenReason] = useState("");
   const query = useQuery({
-    queryKey: ["request-detail", requestId],
+    queryKey: ["request-detail", requestId, user?.id],
     queryFn: () => getRequest(requestId),
   });
   const responses = useInfiniteQuery({
@@ -51,7 +51,7 @@ export function RequestWorkspace({ requestId }: { requestId: string }) {
     getNextPageParam: (p) => (p.has_more ? p.next_cursor : undefined),
   });
   const choices = useInfiniteQuery({
-    queryKey: ["request-choices", requestId, keyword],
+    queryKey: ["request-choices", requestId, keyword, user?.id],
     initialPageParam: null as string | null,
     queryFn: async ({ pageParam }) =>
       (
@@ -82,7 +82,7 @@ export function RequestWorkspace({ requestId }: { requestId: string }) {
       });
     },
     onSuccess: (updated) => {
-      client.setQueryData(["request-detail", requestId], updated);
+      client.setQueryData(["request-detail", requestId, user?.id], updated);
       setAction(null);
       setReason("");
       refresh();
@@ -119,7 +119,7 @@ export function RequestWorkspace({ requestId }: { requestId: string }) {
       });
     },
     onSuccess: (updated) => {
-      client.setQueryData(["request-detail", requestId], updated);
+      client.setQueryData(["request-detail", requestId, user?.id], updated);
       setReopenAction(null);
       setReopenReason("");
       refresh();
@@ -204,7 +204,7 @@ export function RequestWorkspace({ requestId }: { requestId: string }) {
               关闭需求
             </Button>
           )}
-          {(row.status === "fulfilled" || row.status === "closed") && (
+          {(row.status === "fulfilled" || (row.status === "closed" && isAdmin(user))) && (
             <Button
               variant="secondary"
               onClick={() => {

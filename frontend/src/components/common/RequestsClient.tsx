@@ -35,7 +35,7 @@ export function RequestsClient({ initialCourse, initialOpen }: {
   initialOpen: boolean;
 }) {
   const queryClient = useQueryClient();
-  const { status: sessionStatus } = useAuthStore();
+  const { status: sessionStatus, user } = useAuthStore();
   const authed = sessionStatus === 'authenticated';
 
   const [statusFilter, setStatusFilter] = useState<'open' | 'all'>('open');
@@ -44,7 +44,7 @@ export function RequestsClient({ initialCourse, initialOpen }: {
 
   const listQuery = useInfiniteQuery({
     initialPageParam: null as string | null,
-    queryKey: ['requests', statusFilter, initialCourse?.id],
+    queryKey: ['requests', statusFilter, initialCourse?.id, user?.id],
     queryFn: ({ pageParam }) =>
       listRequests({ course_id: initialCourse?.id, cursor: pageParam, status: statusFilter === 'all' ? undefined : 'open', limit: 20 }),
     getNextPageParam: page => page.has_more ? page.next_cursor : undefined,
