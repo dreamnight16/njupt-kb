@@ -146,6 +146,75 @@ class ReportEventOut(_ORMModel):
     created_at: datetime
 
 
+# --- 评论举报与申诉（§18、§20.2）---
+
+
+class CommentReportCreateIn(BaseModel):
+    """资料讨论区举报：理由必填 1–500 字，自举报由服务层拒绝。"""
+
+    resource_id: uuid.UUID
+    comment_id: uuid.UUID
+    reason: str = Field(min_length=1, max_length=500)
+
+
+class CommentReportOut(BaseModel):
+    """评论举报工单。附带评论摘要供管理员判断；评论正文不写入审计。"""
+
+    id: uuid.UUID
+    resource_id: uuid.UUID
+    comment_id: uuid.UUID
+    reporter_id: uuid.UUID
+    reason: str
+    status: ReportStatus
+    revision: int
+    created_at: datetime
+    updated_at: datetime
+    comment_body: str | None = None
+    comment_status: Literal["visible", "withdrawn", "hidden"] | None = None
+    comment_revision: int | None = None
+    comment_author_id: uuid.UUID | None = None
+
+
+class CommentReportDecisionIn(BaseModel):
+    """受理 / 驳回 / 处置。处置（resolve）会复用评论隐藏能力，需给出评论当前修订号。"""
+
+    action: Literal["accept", "dismiss", "resolve"]
+    reason: str = Field(min_length=1, max_length=500)
+    expected_revision: int = Field(ge=1)
+    comment_revision: int | None = Field(default=None, ge=1)
+
+
+class CommentAppealCreateIn(BaseModel):
+    resource_id: uuid.UUID
+    comment_id: uuid.UUID
+    reason: str = Field(min_length=1, max_length=500)
+
+
+class CommentAppealOut(BaseModel):
+    id: uuid.UUID
+    comment_id: uuid.UUID
+    resource_id: uuid.UUID
+    appellant_id: uuid.UUID
+    reason: str
+    status: Literal["pending", "accepted", "rejected"]
+    revision: int
+    handled_by: uuid.UUID | None = None
+    handled_at: datetime | None = None
+    created_at: datetime
+    updated_at: datetime
+    comment_status: Literal["visible", "withdrawn", "hidden"] | None = None
+    comment_revision: int | None = None
+
+
+class CommentAppealDecisionIn(BaseModel):
+    """采纳（恢复评论）或驳回；采纳时需给出评论当前修订号。"""
+
+    decision: Literal["accept", "reject"]
+    reason: str = Field(min_length=1, max_length=500)
+    expected_revision: int = Field(ge=1)
+    comment_revision: int | None = Field(default=None, ge=1)
+
+
 # --- 审计 ---
 
 

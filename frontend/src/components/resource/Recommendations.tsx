@@ -11,7 +11,7 @@ export async function Recommendations({ courseId }: { courseId?: string }) {
     <section aria-label={courseId ? '这门课值得看看' : '值得看看'}>
       <h2 className="dn-display text-2xl">{courseId ? '这门课值得看看' : '值得看看'}</h2>
       <p className="mt-2 text-sm text-text-secondary">
-        优先关注的课程与贡献者，再参考时效、评价、收藏和更新时间。
+        优先关注的课程与贡献者，再参考时效、评价、收藏和更新时间；其中保留一个新内容探索位。
       </p>
       <div className="mt-4">
         {result.error ? (
@@ -23,7 +23,14 @@ export async function Recommendations({ courseId }: { courseId?: string }) {
                 <ResourceCard resourceId={item.resource_id} title={item.title}
                   resourceType={item.resource_type} courseName={item.course?.name}
                   courseCode={item.course?.code} freshness={item.freshness_status} rating={item.rating} />
-                <p className="mt-2 text-xs text-text-secondary">{item.reasons.join(' · ')}</p>
+                <p className="mt-2 flex flex-wrap items-center gap-2 text-xs text-text-secondary">
+                  {item.explore && (
+                    <span className="border border-control-border px-1.5 py-0.5 text-[0.6875rem] font-semibold text-text-primary">
+                      探索位
+                    </span>
+                  )}
+                  <span>{item.reasons.join(' · ')}</span>
+                </p>
               </li>
             ))}
           </ul>

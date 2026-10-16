@@ -37,15 +37,33 @@ async def list_managed_comments(db, *, hidden_only, cursor, limit):
                       next_cursor=encode_cursor({"t": rows[-1].created_at.isoformat(), "i": str(rows[-1].id)}) if more else None)
 
 
+async def get_comment(
+    db: AsyncSession, *, resource_id: uuid.UUID, comment_id: uuid.UUID
+) -> Comment:
+    """按资源读取单条评论；供举报/申诉等治理流程复用，不在此处做权限判定。"""
+    comment = (
+        await db.execute(
+            select(Comment).where(Comment.id == comment_id, Comment.resource_id == resource_id)
+        )
+    ).scalar_one_or_none()
+    if comment is None:
+        raise NotFound("评论不存在")
+    return comment
+
+
 async def manage_comment(
     db: AsyncSession, *, user, resource_id: uuid.UUID, comment_id: uuid.UUID,
     expected_revision: int, hidden: bool | None = None, reason: str | None = None,
-    request_id: str | None = None,
+    request_id: str | None = None, enforce_permission: bool = True,
 ) -> CommentItem:
-    """hidden=None 表示作者撤回；布尔值表示管理员设置隐藏状态。"""
+    """hidden=None 表示作者撤回；布尔值表示管理员设置隐藏状态。
+
+    ``enforce_permission=False`` 供已由上游校验（如 REPORT_HANDLE 处置举报）复用时关闭
+    本函数自身的 COMMENT_MODERATE 判定，避免重复实现一套隐藏逻辑。
+    """
     if user.status != AccountStatus.ACTIVE:
         raise Forbidden("当前账号不能执行此操作")
-    if hidden is not None and not has_permission(user, COMMENT_MODERATE):
+    if hidden is not None and enforce_permission and not has_permission(user, COMMENT_MODERATE):
         raise Forbidden("需要评论管理权限")
     if hidden is not None:
         reason = (reason or "").strip()

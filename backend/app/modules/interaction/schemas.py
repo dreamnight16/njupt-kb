@@ -91,6 +91,8 @@ class CommentItem(BaseModel):
     created_at: datetime
     status: Literal["visible", "withdrawn", "hidden"] = "visible"
     revision: int = 1
+    # 仅对评论作者（或具备评论管理权限者）返回：管理员隐藏该评论时给出的处理理由。
+    moderation_reason: str | None = None
 
 
 class CommentWithdraw(_InputModel):
@@ -241,6 +243,8 @@ class SearchItem(BaseModel):
 
 class RecommendationItem(SearchItem):
     reasons: list[str]
+    # 是否为固定探索槽位项：前端据此区分展示（其理由中含「新内容，供探索」）。
+    explore: bool = False
 
 
 class RecommendationsOut(BaseModel):
