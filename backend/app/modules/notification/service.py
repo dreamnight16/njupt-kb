@@ -328,6 +328,33 @@ async def _load_version(session: AsyncSession, version_id: uuid.UUID) -> Any | N
         return None
 
 
+async def _load_correction(
+    session: AsyncSession, correction_id: uuid.UUID
+) -> dict[str, uuid.UUID | None] | None:
+    """只读 interaction 的 corrections 表（不导入对方模型类，§2.2）。"""
+    row = (
+        await session.execute(
+            text(
+                "SELECT submitter_id, handled_by, resource_id, version_id "
+                "FROM corrections WHERE id = :correction_id"
+            )
+            .bindparams(bindparam("correction_id", type_=Uuid()))
+            .columns(
+                submitter_id=Uuid(), handled_by=Uuid(), resource_id=Uuid(), version_id=Uuid()
+            ),
+            {"correction_id": correction_id},
+        )
+    ).one_or_none()
+    if row is None:
+        return None
+    return {
+        "submitter_id": row.submitter_id,
+        "handled_by": row.handled_by,
+        "resource_id": row.resource_id,
+        "version_id": row.version_id,
+    }
+
+
 async def _notify_version_submitted(
     session: AsyncSession, event: DomainEvent
 ) -> list[Notification]:
@@ -474,6 +501,42 @@ async def _notify_report_resolved(
     ]
 
 
+async def _notify_correction_resolved(
+    session: AsyncSession, event: DomainEvent
+) -> list[Notification]:
+    """纠错工单处理结果：通知提交人；处理人即提交人时不通知自己（§20.2）。
+
+    收件人只认纠错工单的提交人，处理人优先使用事件发生时的载荷，
+    与资料所有权判断解耦；CORRECTION_CREATED 是提交人本人动作，不登记通知。
+    """
+    correction = await _load_correction(session, event.subject_id)
+    if correction is None:
+        return []
+    status = str((event.payload or {}).get("status", ""))
+    if status == "open":
+        return []
+    submitter_id = correction["submitter_id"]
+    handler_id = _payload_uuid(event, "handled_by") or correction["handled_by"]
+    if submitter_id == handler_id:
+        # 自己处理自己提交的工单，不给自己发通知。
+        return []
+    outcomes = {"accepted": "已采纳", "fixed": "已修复", "rejected": "未采纳"}
+    return [
+        _build(
+            submitter_id,
+            NotificationType.CORRECTION_RESULT,
+            "你的纠错已有处理结果",
+            f"你提交的纠错{outcomes.get(status, '已处理')}。",
+            {
+                "correction_id": str(event.subject_id),
+                "status": status,
+                "resource_id": str(correction["resource_id"]),
+                "version_id": str(correction["version_id"]),
+            },
+        )
+    ]
+
+
 async def _course_followers(session: AsyncSession, course_id: uuid.UUID) -> list[uuid.UUID]:
     """只读 interaction 的 follows 表（不导入对方模型类，§2.2）。"""
     rows = await session.execute(
@@ -538,6 +601,8 @@ _EVENT_HANDLERS: dict[str, _EventHandler] = {
     DomainEventType.RESOURCE_PUBLISHED.value: _notify_published,
     DomainEventType.RESOURCE_WITHDRAWN.value: _notify_withdrawn,
     DomainEventType.REPORT_RESOLVED.value: _notify_report_resolved,
+    # CORRECTION_CREATED 是提交人本人动作，无需站内通知，故意不登记。
+    DomainEventType.CORRECTION_RESOLVED.value: _notify_correction_resolved,
     DomainEventType.REQUEST_UPDATED.value: _notify_request_updated,
 }
 

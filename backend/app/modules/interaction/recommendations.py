@@ -1,7 +1,12 @@
 """P2 规则推荐：先过滤可见性，再以可解释的规则取前 N 条。
 
 在规则结果中保留一个固定探索槽位，让新内容有曝光机会，同时不改变规则项之间的排序契约
-（关注命中 → 现行状态 → 收缩评分 → 收藏数 → 更新时间 → 资源 ID）。
+（专业相关 → 关注命中 → 现行状态 → 收缩评分 → 收藏数 → 更新时间 → 资源 ID）。
+
+专业相关（beta14）：查看者 user_profiles 的 major_id 命中其培养方案（curricula →
+curriculum_courses）关联课程的资源排最前，理由「与你专业相关」；仅 college_id 命中
+（同学院其他专业方案）次之。无 profile / 无 major / 方案无覆盖时该键恒为 0，
+排序与理由回退既有逻辑，不报错。
 
 探索槽位参数（**待确认的默认值**，集中在此处便于后续调整）：
 - 仅当请求条数 ``limit >= EXPLORE_ENABLED_MIN_LIMIT`` 时启用，占 1 个槽位（最多 1/4）；
@@ -14,7 +19,21 @@ from __future__ import annotations
 import uuid
 from datetime import datetime, timedelta, timezone
 
-from sqlalchemy import DateTime, String, Uuid, case, column, exists, false, func, or_, select, table
+from sqlalchemy import (
+    DateTime,
+    Integer,
+    String,
+    Uuid,
+    case,
+    column,
+    exists,
+    false,
+    func,
+    or_,
+    select,
+    table,
+    true,
+)
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.modules.interaction.models import Favorite, Follow, Rating
@@ -33,6 +52,97 @@ EXPLORE_SLOT_POSITION = 3  # 1-based
 EXPLORE_MAX_AGE_DAYS = 30
 EXPLORE_MAX_RATING_COUNT = 3
 EXPLORE_REASON = "新内容，供探索"
+
+# --- 专业相关信号（beta14）：只读引用 identity/catalog 的表，不导入对方模型类 ---
+_PROFILES = table(
+    "user_profiles",
+    column("user_id", Uuid),
+    column("major_id", Uuid),
+    column("college_id", Uuid),
+    column("enrollment_year", Integer),
+)
+_CURRICULA = table(
+    "curricula",
+    column("id", Uuid),
+    column("major_id", Uuid),
+    column("entry_year", Integer),
+    column("status", String),
+)
+_CURRICULUM_COURSES = table(
+    "curriculum_courses", column("curriculum_id", Uuid), column("course_id", Uuid)
+)
+_MAJORS = table("majors", column("id", Uuid), column("college_id", Uuid))
+
+# 专业信号权重：major 精确命中 > 仅 college 命中 > 无信号。
+_MAJOR_MATCH_WEIGHT = 2
+_COLLEGE_MATCH_WEIGHT = 1
+
+
+async def _major_signal(db: AsyncSession, *, user, resources):
+    """构建「专业相关」排序信号：major 命中培养方案课程 > college 命中。
+
+    返回 (major_case 表达式, major_hit 可选标签, college_hit 可选标签)；
+    无 profile / 无 major / 方案无覆盖时返回 None，调用方保持原排序不变。
+    """
+    if user is None:
+        return None
+    profile = (
+        await db.execute(
+            select(
+                _PROFILES.c.major_id,
+                _PROFILES.c.college_id,
+                _PROFILES.c.enrollment_year,
+            ).where(_PROFILES.c.user_id == user.id)
+        )
+    ).first()
+    if profile is None or (profile.major_id is None and profile.college_id is None):
+        return None
+    r = resources.c
+
+    def _course_in_curricula(curricula_ids):
+        return exists(
+            select(_CURRICULUM_COURSES.c.course_id).where(
+                _CURRICULUM_COURSES.c.curriculum_id.in_(curricula_ids),
+                _CURRICULUM_COURSES.c.course_id == r.course_id,
+            )
+        ).correlate(resources)
+
+    major_hit = college_hit = None
+    if profile.major_id is not None:
+        year_condition = true()
+        if profile.enrollment_year is not None:
+            # 入学年级已知时按年级取方案；方案未记录年级（待目录确认）时不排除。
+            year_condition = or_(
+                _CURRICULA.c.entry_year.is_(None),
+                _CURRICULA.c.entry_year == profile.enrollment_year,
+            )
+        curricula_ids = select(_CURRICULA.c.id).where(
+            _CURRICULA.c.major_id == profile.major_id,
+            _CURRICULA.c.status == "active",
+            year_condition,
+        )
+        major_hit = _course_in_curricula(curricula_ids)
+    if profile.college_id is not None:
+        college_curricula_ids = select(_CURRICULA.c.id).where(
+            _CURRICULA.c.status == "active",
+            _CURRICULA.c.major_id.in_(
+                select(_MAJORS.c.id).where(_MAJORS.c.college_id == profile.college_id)
+            ),
+        )
+        college_hit = _course_in_curricula(college_curricula_ids)
+    if major_hit is None and college_hit is None:
+        return None
+    if major_hit is not None and college_hit is not None:
+        signal = case(
+            (major_hit, _MAJOR_MATCH_WEIGHT),
+            (college_hit, _COLLEGE_MATCH_WEIGHT),
+            else_=0,
+        )
+    elif major_hit is not None:
+        signal = case((major_hit, _MAJOR_MATCH_WEIGHT), else_=0)
+    else:
+        signal = case((college_hit, _COLLEGE_MATCH_WEIGHT), else_=0)
+    return signal, major_hit, college_hit
 
 
 async def recommend_resources(
@@ -89,9 +199,19 @@ async def recommend_resources(
     )
     if course_id is not None:
         query = query.where(r.course_id == course_id)
+    # 专业相关作为一级排序键置于最前；无信号时 query 与排序保持不变（回退既有逻辑）。
+    signal = await _major_signal(db, user=user, resources=resources)
+    if signal is not None:
+        major_case, major_hit, college_hit = signal
+        query = query.add_columns(
+            (major_hit if major_hit is not None else false()).label("major_hit"),
+            (college_hit if college_hit is not None else false()).label("college_hit"),
+        )
     ordering = [freshness, shrunk.desc(), favorite_count.desc(), r.updated_at.desc(), r.id]
     if user is not None:
         ordering.insert(0, interest.desc())
+    if signal is not None:
+        ordering.insert(0, major_case.desc())
     rows = list((await db.execute(query.order_by(*ordering).limit(limit))).all())
     courses = await _course_brief_map(db, [row.course_id for row in rows])
     items = [_item(row, courses, course_id) for row in rows]
@@ -119,6 +239,11 @@ def _item(row, courses, course_id, *, explore: bool = False) -> RecommendationIt
     if explore:
         reasons.append(EXPLORE_REASON)
     else:
+        # 专业信号为一级键，理由置于最前；无该列（无 profile 等）时静默跳过。
+        if getattr(row, "major_hit", None):
+            reasons.append("与你专业相关")
+        elif getattr(row, "college_hit", None):
+            reasons.append("与你学院相关")
         if row.course_follow:
             reasons.append("来自你关注的课程")
         if row.creator_follow:

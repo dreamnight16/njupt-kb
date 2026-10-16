@@ -7,7 +7,9 @@ import {
 } from "@tanstack/react-query";
 import toast from "react-hot-toast";
 import { Button } from "@/components/ui/Button";
+import { EmptyState } from "@/components/ui/EmptyState";
 import { Notice } from "@/components/common/Notice";
+import { Bell } from "lucide-react";
 import {
   listNotifications,
   setNotificationRead,
@@ -66,8 +68,11 @@ export default function NotificationsPage() {
       ) : query.isPending ? (
         <p role="status">正在加载通知…</p>
       ) : query.data?.pages.every((p) => !p.items.length) ? (
-        <Notice title="还没有通知">
-        </Notice>
+        <EmptyState
+          icon={Bell}
+          title="还没有通知"
+          description="互动、需求进展与内容状态更新会在这里提醒你。"
+        />
       ) : (
         <ul className="space-y-3">
           {query.data?.pages

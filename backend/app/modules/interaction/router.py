@@ -370,6 +370,7 @@ async def create_request(
 async def list_requests(
     course_id: uuid.UUID | None = None,
     request_status: str | None = Query(default=None, alias="status"),
+    sort: str = Query(default="latest", description="latest=最新（默认）；hot=近 7 天开放需求榜（按关注数）"),
     cursor: str | None = None,
     limit: int | None = Query(default=None, ge=1, le=100),
     db: AsyncSession = Depends(get_db),
@@ -382,6 +383,7 @@ async def list_requests(
         cursor=cursor,
         limit=limit,
         viewer=user,
+        sort=sort,
     )
 
 

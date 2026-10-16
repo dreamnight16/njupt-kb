@@ -1,11 +1,13 @@
 import type { Metadata } from 'next';
 import Link from 'next/link';
 import { notFound } from 'next/navigation';
+import { Award, FileText } from 'lucide-react';
 
 import { Notice } from '@/components/common/Notice';
 import { CreatorFollowButton } from '@/components/creator/CreatorFollowButton';
 import { Avatar } from '@/components/common/Avatar';
 import { ResourceCard } from '@/components/resource/ResourceCard';
+import { EmptyState } from '@/components/ui/EmptyState';
 import {
   CONTRIBUTION_KIND_LABELS,
   type ContributionKind,
@@ -14,7 +16,7 @@ import {
 import type { ResourceListItem } from '@/lib/api/content';
 import { serverFetch } from '@/lib/api/server';
 import type { CursorPage } from '@/lib/api/types';
-import { isUuid } from '@/lib/utils';
+import { firstSearchParam, isUuid } from '@/lib/utils';
 
 export const dynamic = 'force-dynamic';
 
@@ -42,8 +44,10 @@ export async function generateMetadata({
 
 export default async function CreatorProfilePage({
   params,
+  searchParams,
 }: {
   params: Promise<{ id: string }>;
+  searchParams: Promise<{ cursor?: string | string[] }>;
 }) {
   const { id } = await params;
   if (!isUuid(id)) notFound();
@@ -60,8 +64,9 @@ export default async function CreatorProfilePage({
     );
   }
 
+  const cursor = firstSearchParam((await searchParams).cursor);
   const resourcesResult = await serverFetch<CursorPage<ResourceListItem>>(
-    `/resources?owner_id=${id}&limit=20`,
+    `/resources?owner_id=${id}&limit=20${cursor ? `&cursor=${encodeURIComponent(cursor)}` : ''}`,
   );
   const { contribution } = profile;
   const kinds = Object.entries(contribution.by_kind) as [ContributionKind, number][];
@@ -116,8 +121,11 @@ export default async function CreatorProfilePage({
           </dl>
         ) : (
           <div className="mt-3">
-            <Notice tone="info" title="还没有可展示的贡献记录">
-            </Notice>
+            <EmptyState
+              icon={Award}
+              title="还没有可展示的贡献记录"
+              description="上传被采纳的资料、提交纠错等都会计入贡献。"
+            />
           </div>
         )}
       </section>
@@ -144,11 +152,19 @@ export default async function CreatorProfilePage({
               ))}
             </div>
           ) : (
-            <Notice tone="info" title="还没有公开资料" />
+            <EmptyState
+              icon={FileText}
+              title="还没有公开资料"
+              description="该作者公开发布的资料会显示在这里。"
+            />
           )}
         </div>
       </section>
 
+      <p className="text-sm text-text-secondary">
+        {cursor && <Link href={`/creators/${id}`} className="mr-4 inline-flex min-h-11 items-center text-brand underline">回到第一页</Link>}
+        {resourcesResult.data?.has_more && resourcesResult.data.next_cursor && <Link href={`/creators/${id}?cursor=${encodeURIComponent(resourcesResult.data.next_cursor)}`} className="mr-4 inline-flex min-h-11 items-center text-brand underline">下一页资料</Link>}
+      </p>
       <p className="text-sm text-text-secondary">
         贡献记录用于展示与运营，不承诺兑换现金。想查看自己的贡献，可前往{' '}
         <Link href="/me/contributions" className="underline underline-offset-2">

@@ -4,9 +4,11 @@ import Link from 'next/link';
 import { useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import toast from 'react-hot-toast';
+import { Flag, MessageSquareWarning, Scale } from 'lucide-react';
 
 import { Notice } from '@/components/common/Notice';
 import { Button } from '@/components/ui/Button';
+import { EmptyState } from '@/components/ui/EmptyState';
 import { Modal } from '@/components/ui/Modal';
 import { SkeletonList } from '@/components/ui/Skeleton';
 import {
@@ -222,9 +224,11 @@ function ResourceReportsPanel() {
           ))}
         </ul>
       ) : (
-        <Notice tone="info" title="当前没有待处理投诉">
-          未经核实的举报不会直接影响创作者收益。
-        </Notice>
+        <EmptyState
+          icon={Flag}
+          title="当前没有待处理投诉"
+          description="未经核实的举报不会直接影响创作者收益。"
+        />
       )}
 
       {active && (
@@ -488,9 +492,11 @@ function CommentReportsPanel() {
           ))}
         </ul>
       ) : (
-        <Notice tone="info" title="当前没有待处理评论举报">
-          讨论区的举报会进入独立工单；受理不等于认定违规。
-        </Notice>
+        <EmptyState
+          icon={MessageSquareWarning}
+          title="当前没有待处理评论举报"
+          description="讨论区的举报会进入独立工单；受理不等于认定违规。"
+        />
       )}
 
       {active && (
@@ -709,9 +715,11 @@ function AppealsPanel() {
           ))}
         </ul>
       ) : (
-        <Notice tone="info" title="当前没有待裁决申诉">
-          被隐藏评论的作者可提交一次申诉；采纳后评论会恢复展示。
-        </Notice>
+        <EmptyState
+          icon={Scale}
+          title="当前没有待裁决申诉"
+          description="被隐藏评论的作者可提交一次申诉；采纳后评论会恢复展示。"
+        />
       )}
 
       {active && (

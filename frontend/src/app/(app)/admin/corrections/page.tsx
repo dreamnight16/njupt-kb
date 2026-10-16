@@ -4,9 +4,11 @@ import Link from 'next/link';
 import { useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import toast from 'react-hot-toast';
+import { PencilLine } from 'lucide-react';
 
 import { Notice } from '@/components/common/Notice';
 import { Button } from '@/components/ui/Button';
+import { EmptyState } from '@/components/ui/EmptyState';
 import { Modal } from '@/components/ui/Modal';
 import { SkeletonList } from '@/components/ui/Skeleton';
 import { describeError } from '@/lib/api/client';
@@ -128,7 +130,11 @@ export default function AdminCorrectionsPage() {
           ))}
         </ul>
       ) : (
-        <Notice tone="info" title="当前没有待处理纠错" />
+        <EmptyState
+          icon={PencilLine}
+          title="当前没有待处理纠错"
+          description="用户提交的内容纠错会进入这里。"
+        />
       )}
 
       {active && (

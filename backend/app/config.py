@@ -51,6 +51,8 @@ class Settings(BaseSettings):
     COOKIE_SECURE: bool | None = None
     LOGIN_RATE_LIMIT_PER_HOUR: int = 20
     LOGIN_FAILURE_LOCKOUT_THRESHOLD: int = 10
+    # 单账号并发活跃会话上限（beta14）：0 表示不限；登录成功仍放行，仅按 issued_at 淘汰最旧会话。
+    SESSION_MAX_ACTIVE_PER_USER: int = Field(default=5, ge=0)
 
     # --- 对象存储（§16）：私有原件、私有预览、隔离上传区 ---
     S3_ENDPOINT_URL: str = "http://localhost:9000"
@@ -138,6 +140,15 @@ class Settings(BaseSettings):
     RATE_LIMIT_LOGIN: dict[str, int] = {
         "anon": 5, "user": 5, "contributor": 5, "reviewer": 5, "admin": 5,
     }
+
+    # --- beta14 下载速率检测（access 域）：按用户维度的次级防护，不替代上面的分级限流 ---
+    # 窗口内下载授权次数超过阈值即记录异常速率；数值为可调默认值，非最终运营策略。
+    DOWNLOAD_VELOCITY_WINDOW_SECONDS: int = Field(default=300, ge=1)
+    DOWNLOAD_VELOCITY_WINDOW_COUNT: int = Field(default=30, ge=1)
+
+    # --- beta14 热门排序时间衰减（catalog/推荐域）：越新的内容热度衰减越慢 ---
+    HOT_SCORE_TIME_DECAY_DAYS: int = Field(default=14, ge=1)
+    HOT_SCORE_DECAY_POWER: float = Field(default=1.5, gt=0, allow_inf_nan=False)
 
     # --- beta13 治理队列防滥用（buchong.md）：举报/申诉提交频控与未处理上限 ---
     # 均为可调默认值，不视为最终策略；频控与上限按用户维度，避免单一账号刷爆治理队列。

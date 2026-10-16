@@ -20,13 +20,16 @@ import re
 import hashlib
 import tempfile
 import uuid
+import math
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 from sqlalchemy import (
     Integer,
+    String,
     Uuid,
     and_,
+    case,
     column,
     delete,
     func,
@@ -45,6 +48,7 @@ from app.core.enums import (
     DomainEventType,
     FilePurpose,
     FreshnessStatus,
+    GrantStatus,
     JobType,
     PublicationStatus,
     ResourceType,
@@ -106,6 +110,11 @@ _OFFERINGS = table(
     "course_offerings", column("id", Uuid), column("course_id", Uuid), column("semester_id", Uuid)
 )
 _SEMESTERS = table("semesters", column("id", Uuid), column("academic_year", Integer))
+# 计数展示用的跨模块只读引用：不导入 access/interaction 模型类（§2.2）。
+_DOWNLOAD_GRANTS = table(
+    "download_grants", column("resource_id", Uuid), column("status", String)
+)
+_FAVORITES = table("favorites", column("resource_id", Uuid))
 
 
 def _now() -> datetime:
@@ -477,6 +486,59 @@ async def _preview_ready(db: AsyncSession, version_id: uuid.UUID) -> bool:
     return bool(count)
 
 
+async def _resource_download_count(db: AsyncSession, resource_id: uuid.UUID) -> int:
+    """下载计数：只统计 consumed 状态的 download_grants（§17.2）。"""
+    count = await db.scalar(
+        select(func.count())
+        .select_from(_DOWNLOAD_GRANTS)
+        .where(
+            _DOWNLOAD_GRANTS.c.resource_id == resource_id,
+            _DOWNLOAD_GRANTS.c.status == GrantStatus.CONSUMED.value,
+        )
+    )
+    return int(count or 0)
+
+
+async def _resource_favorite_count(db: AsyncSession, resource_id: uuid.UUID) -> int:
+    """收藏计数：favorites 行数（§20.1）。"""
+    count = await db.scalar(
+        select(func.count())
+        .select_from(_FAVORITES)
+        .where(_FAVORITES.c.resource_id == resource_id)
+    )
+    return int(count or 0)
+
+
+def _hot_score_expression(db: AsyncSession, as_of: datetime):
+    """资源热门分（beta14 sort=hot）：互动量按创建时间衰减，全程在 SQL 内计算。
+
+    score = 互动量 / (age_days + HOT_SCORE_TIME_DECAY_DAYS) ^ HOT_SCORE_DECAY_POWER，
+    互动量 = favorites 计数 + 已消费 download_grants 计数；age 从 Resource.created_at 起算。
+    系数取自主控统一配置（app/config.py）；SQLite 用 julianday、PG 用 extract(epoch)，
+    两者方言均内置 pow，避免把整表拉回内存排序。
+    """
+    decay_days = settings.HOT_SCORE_TIME_DECAY_DAYS
+    decay_power = settings.HOT_SCORE_DECAY_POWER
+    engagement = func.coalesce(
+        select(func.count()).select_from(_FAVORITES)
+        .where(_FAVORITES.c.resource_id == Resource.id).scalar_subquery(),
+        0,
+    ) + func.coalesce(
+        select(func.count()).select_from(_DOWNLOAD_GRANTS)
+        .where(
+            _DOWNLOAD_GRANTS.c.resource_id == Resource.id,
+            _DOWNLOAD_GRANTS.c.status == GrantStatus.CONSUMED.value,
+        ).scalar_subquery(),
+        0,
+    )
+    if db.get_bind().dialect.name == "sqlite":
+        age_days = func.julianday(as_of) - func.julianday(Resource.created_at)
+    else:
+        age_days = (as_of.timestamp() - func.extract("epoch", Resource.created_at)) / 86400.0
+    age_days = case((age_days < 0, 0.0), else_=age_days)
+    return engagement / func.pow(age_days + decay_days, decay_power)
+
+
 async def _load_owned_files(
     db: AsyncSession, *, user, files: list[VersionFileIn]
 ) -> None:
@@ -846,6 +908,7 @@ async def withdraw_resource(
 async def get_resource_detail(db: AsyncSession, *, user, resource_id: uuid.UUID) -> ResourceDetailOut:
     from app.modules.access.service import authorize
     from app.core.enums import Capability
+    from app.modules.interaction.service import resource_rating_summary
 
     resource = await get_resource(db, resource_id)
     is_owner = bool(user) and user.id == resource.owner_id
@@ -863,6 +926,8 @@ async def get_resource_detail(db: AsyncSession, *, user, resource_id: uuid.UUID)
     preview_available = False
     if version is not None and not version.preview_disabled:
         preview_available = await _preview_ready(db, version.id)
+    download_count = await _resource_download_count(db, resource.id)
+    favorite_count = await _resource_favorite_count(db, resource.id)
     return ResourceDetailOut(
         id=resource.id,
         course_id=resource.course_id,
@@ -878,6 +943,9 @@ async def get_resource_detail(db: AsyncSession, *, user, resource_id: uuid.UUID)
         updated_at=resource.updated_at,
         published_version=_version_out(version) if version else None,
         preview_available=preview_available,
+        download_count=download_count,
+        favorite_count=favorite_count,
+        rating_summary=await resource_rating_summary(db, resource.id),
     )
 
 
@@ -897,9 +965,14 @@ async def list_resources(
     limit: int | None = None,
     cursor: str | None = None,
 ) -> ResourceListOut:
-    """已发布资源列表；默认只返回已发布版本（§19.1）。"""
-    if sort not in ("latest", "oldest"):
-        raise InvalidInput("不支持的排序方式", details={"allowed": ["latest", "oldest"]})
+    """已发布资源列表；默认只返回已发布版本（§19.1）。
+
+    ``sort=hot``（beta14）按热门分降序 + id 降序：互动量按创建时间衰减
+    （``_hot_score_expression``），游标键为 score + id，与 latest/oldest 的
+    时间游标不可混用；默认排序行为不变。
+    """
+    if sort not in ("latest", "oldest", "hot"):
+        raise InvalidInput("不支持的排序方式", details={"allowed": ["latest", "oldest", "hot"]})
     size = normalize_page_size(limit)
 
     from app.modules.access.visibility import visible_resource_ids
@@ -948,35 +1021,62 @@ async def list_resources(
             )
         )
 
+    as_of = _now()
     if cursor:
         payload = decode_cursor(cursor)
         try:
-            ts = datetime.fromisoformat(payload["ts"])
             last_id = uuid.UUID(payload["id"])
+            if sort == "hot":
+                last_score = float(payload["s"])
+                as_of = datetime.fromisoformat(payload["at"])
+                if not math.isfinite(last_score) or last_score < 0 or as_of.tzinfo is None:
+                    raise ValueError("invalid hot cursor")
+            else:
+                ts = datetime.fromisoformat(payload["ts"])
         except (KeyError, ValueError, TypeError) as exc:
             raise InvalidInput("cursor 无效") from exc
-        ts = _aware(ts)
-        if sort == "latest":
+        if sort == "hot":
+            # 固定首屏计分时间，避免时间衰减令已展示行落入后续页。
+            hot_score = _hot_score_expression(db, as_of)
             stmt = stmt.where(
                 or_(
-                    Resource.updated_at < ts,
-                    and_(Resource.updated_at == ts, Resource.id < last_id),
-                )
+                    hot_score < last_score,
+                    and_(hot_score == last_score, Resource.id < last_id),
+                ),
             )
         else:
-            stmt = stmt.where(
-                or_(
-                    Resource.updated_at > ts,
-                    and_(Resource.updated_at == ts, Resource.id > last_id),
+            ts = _aware(ts)
+            if sort == "latest":
+                stmt = stmt.where(
+                    or_(
+                        Resource.updated_at < ts,
+                        and_(Resource.updated_at == ts, Resource.id < last_id),
+                    )
                 )
-            )
+            else:
+                stmt = stmt.where(
+                    or_(
+                        Resource.updated_at > ts,
+                        and_(Resource.updated_at == ts, Resource.id > last_id),
+                    )
+                )
 
-    if sort == "latest":
+    if sort == "hot":
+        hot_score = _hot_score_expression(db, as_of)
+        stmt = stmt.add_columns(hot_score.label("hot_score")).order_by(hot_score.desc(), Resource.id.desc())
+    elif sort == "latest":
         stmt = stmt.order_by(Resource.updated_at.desc(), Resource.id.desc())
     else:
         stmt = stmt.order_by(Resource.updated_at.asc(), Resource.id.asc())
 
-    rows = list((await db.execute(stmt.limit(size + 1))).scalars().all())
+    result = await db.execute(stmt.limit(size + 1))
+    scores = {}
+    if sort == "hot":
+        ranked = result.all()
+        rows = [row[0] for row in ranked]
+        scores = {row[0].id: float(row.hot_score) for row in ranked}
+    else:
+        rows = list(result.scalars().all())
     has_more = len(rows) > size
     rows = rows[:size]
 
@@ -1003,11 +1103,14 @@ async def list_resources(
                 updated_at=row.updated_at,
             )
         )
-    next_cursor = (
-        encode_cursor({"ts": rows[-1].updated_at.isoformat(), "id": str(rows[-1].id)})
-        if has_more and rows
-        else None
-    )
+    if sort == "hot" and has_more and rows:
+        next_cursor = encode_cursor({"s": scores[rows[-1].id], "id": str(rows[-1].id), "at": as_of.isoformat()})
+    else:
+        next_cursor = (
+            encode_cursor({"ts": rows[-1].updated_at.isoformat(), "id": str(rows[-1].id)})
+            if has_more and rows
+            else None
+        )
     return ResourceListOut(items=items, next_cursor=next_cursor, has_more=has_more)
 
 

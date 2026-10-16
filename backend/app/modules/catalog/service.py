@@ -17,12 +17,12 @@ from collections.abc import Sequence
 from typing import NamedTuple
 
 
-from sqlalchemy import Select, and_, case, column, delete, func, or_, select, table, tuple_, update
+from sqlalchemy import Select, String, and_, case, column, delete, func, or_, select, table, tuple_, update
 from sqlalchemy import Uuid
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.audit import record_audit
-from app.core.enums import CatalogEntityStatus, CourseStatus, SemesterSeason
+from app.core.enums import CatalogEntityStatus, CourseStatus, PublicationStatus, SemesterSeason
 from app.core.errors import InvalidInput, NotFound
 from app.core.pagination import (
     CursorPage,
@@ -65,6 +65,15 @@ from app.modules.catalog.schemas import (
 
 # 公开可浏览的课程状态：待归类与已合并课程不对外出现（§11.2 规则 6）。
 _PUBLIC_COURSE_STATUSES = (CourseStatus.ACTIVE.value, CourseStatus.DEPRECATED.value)
+
+# 只读引用 resources 表做分类计数：不导入 content 模型类（§2.2）。
+_RESOURCES = table(
+    "resources",
+    column("id", Uuid),
+    column("course_id", Uuid),
+    column("resource_type", String),
+    column("publication_status", String),
+)
 
 
 def _public_course_condition():
@@ -199,13 +208,17 @@ async def list_courses(
     )
 
 
-async def get_course_detail(db: AsyncSession, course_id: uuid.UUID) -> CourseDetail:
+async def get_course_detail(
+    db: AsyncSession, course_id: uuid.UUID, user=None
+) -> CourseDetail:
+    """课程详情。`user` 为当前查看者（可为 None）：分类计数按其对资源的可见范围统计。"""
     course = await get_course(db, course_id)
     if course.status not in _PUBLIC_COURSE_STATUSES:
         # 私有/未定状态统一 404，避免泄露存在性（§25.1）。
         raise NotFound("课程不存在")
     names = await _college_name_map(db, [course.owning_college_id])
     aliases = await _aliases_for(db, [course.id])
+    resource_counts = await _resource_type_counts(db, course.id, user)
     rows = (
         await db.execute(
             select(CurriculumCourse, Curriculum, Major, College)
@@ -240,6 +253,7 @@ async def get_course_detail(db: AsyncSession, course_id: uuid.UUID) -> CourseDet
         college_name=names.get(course.owning_college_id) if course.owning_college_id else None,
         aliases=aliases.get(course.id, []),
         curricula=curricula,
+        resource_counts=resource_counts,
     )
 
 
@@ -441,6 +455,30 @@ async def _to_briefs(db: AsyncSession, courses: list[Course]) -> list[CourseBrie
         )
         for c in courses
     ]
+
+
+async def _resource_type_counts(
+    db: AsyncSession, course_id: uuid.UUID, user
+) -> dict[str, int]:
+    """课程下按 resource_type 分组计数（一次 GROUP BY 查询）。
+
+    只统计已发布且对当前查看者可见的资源：可见集合由 access 的可见性谓词决定，
+    禁止裸 COUNT，避免私有资源的存在性被计数泄露（§25.1）。
+    """
+    from app.modules.access.visibility import visible_resource_ids
+
+    stmt = (
+        select(_RESOURCES.c.resource_type, func.count())
+        .select_from(_RESOURCES)
+        .where(
+            _RESOURCES.c.course_id == course_id,
+            _RESOURCES.c.publication_status == PublicationStatus.PUBLISHED.value,
+            _RESOURCES.c.id.in_(visible_resource_ids(user)),
+        )
+        .group_by(_RESOURCES.c.resource_type)
+    )
+    rows = (await db.execute(stmt)).all()
+    return {resource_type: int(count) for resource_type, count in rows}
 
 
 async def _aliases_for(

@@ -8,6 +8,7 @@
 
 from __future__ import annotations
 
+import logging
 import uuid
 from datetime import datetime, timedelta, timezone
 from typing import TYPE_CHECKING
@@ -19,7 +20,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.config import settings
 from app.core import idempotency as idem
 from app.core.audit import record_audit
-from app.core.ratelimit import cache_delete
+from app.core.ratelimit import cache_delete, check_rate_limit
 from app.core.enums import (
     Capability,
     DerivativeKind,
@@ -52,10 +53,13 @@ from app.modules.access.schemas import (
     EntitlementOut,
     PreviewGrantResult,
 )
+from app.db import async_session_factory
 
 if TYPE_CHECKING:  # pragma: no cover
     from app.modules.content.models import Resource, ResourceFile, ResourceVersion, VersionFile
     from app.modules.identity.models import User
+
+logger = logging.getLogger("app.access")
 
 # --- 固定策略参数（首期反滥用粗粒度限制，非收费额度；D05 不接现金/积分）---
 DOWNLOAD_GRANT_SCOPE = "access.download-grant"
@@ -484,8 +488,53 @@ async def issue_download_grant(
     result = await _sign_download(
         db, grant_id=grant.id, resource_file=resource_file, version_no=version.version_no
     )
+    # 下载速率检测（beta14）：只在新授权成功后计一次——授权许可窗口内的重新签发
+    # 是同一授权的链接续签，与配额语义一致不重复计次。
+    await _note_download_velocity(user_id=user.id, request_id=request_id)
     # DownloadGrant 自身保存幂等事实；不缓存会过期的签名链接。
     return result
+
+
+async def _note_download_velocity(*, user_id: uuid.UUID, request_id: str | None) -> None:
+    """下载速率检测（beta14）：只记录审计标记，不阻断本次下载、不自动冻结。
+
+    冻结属于未定稿政策，这里只做可审计的速率事实：按用户维度用 core.ratelimit 的
+    固定窗口计数（Redis 不可用时回落进程内计数，独立于业务事务，业务回滚不会丢计数，
+    与 comment_reports 频控同一先例），窗口内达到阈值即写
+    `security.download_velocity_flagged` 审计。
+
+    审计写入独立会话并自行提交：调用点在业务事务内，若业务事务随后回滚（如外层
+    请求失败），速率标记必须仍然生效（modules/ratelimit 的独立计数会话先例）。
+    任何异常只记日志：速率检测不得影响一次已经成功的下载授权。
+    """
+    try:
+        allowed = await check_rate_limit(
+            f"download-velocity:{user_id}",
+            limit=settings.DOWNLOAD_VELOCITY_WINDOW_COUNT,
+            window_seconds=settings.DOWNLOAD_VELOCITY_WINDOW_SECONDS,
+        )
+        if allowed:
+            return
+        async with async_session_factory() as session:
+            await record_audit(
+                session,
+                action="security.download_velocity_flagged",
+                object_type="user",
+                object_id=user_id,
+                actor_id=user_id,
+                # 阈值与窗口来自 settings（可调）；精确计数由 ratelimit 计数内部维护。
+                after={
+                    "limit": settings.DOWNLOAD_VELOCITY_WINDOW_COUNT,
+                    "window_seconds": settings.DOWNLOAD_VELOCITY_WINDOW_SECONDS,
+                },
+                reason="下载速率超过阈值（仅标记，未阻断）",
+                request_id=request_id,
+            )
+            await session.commit()
+    except Exception:  # noqa: BLE001 - 速率检测失败不得影响已成功的下载授权
+        logger.exception(
+            "download_velocity_flag_failed", extra={"user_id": str(user_id)}
+        )
 
 
 async def _reissue(

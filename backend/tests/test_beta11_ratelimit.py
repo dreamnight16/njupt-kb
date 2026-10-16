@@ -110,8 +110,11 @@ class Beta11RateLimitTests(unittest.IsolatedAsyncioTestCase):
         return base
 
     def _http_client(self):
-        """覆盖两个 db 依赖：业务库与限流计数库都指向测试内存库。"""
+        """业务、限流与独立登录审计会话都指向测试内存库。"""
         from app.main import app
+        from app.modules.identity import service as identity
+
+        self.enterContext(patch.object(identity, "async_session_factory", self.factory))
 
         async def database():
             yield self.db
@@ -344,6 +347,9 @@ class Beta11RateLimitTests(unittest.IsolatedAsyncioTestCase):
         ).all()
         self.assertEqual(len(audits), 2)
         self.assertEqual({audit.after_state["action"] for audit in audits}, {"login"})
+        self.assertEqual(await self.db.scalar(
+            select(func.count(AuditLog.id)).where(AuditLog.action == "identity.login_failed")
+        ), 5)
 
     async def test_search_endpoint_blocks_over_limit(self):
         """搜索端到端：匿名超限后 429，带 Retry-After 头。"""

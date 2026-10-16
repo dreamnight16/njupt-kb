@@ -127,7 +127,9 @@ class Beta5DatabaseTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(put.await_args.args[2], "image/png")
 
     async def test_classification_fix_closes_notifies_audits_and_does_not_replace_file(self):
-        from app.modules.notification.models import Notification
+        from app.core.enums import DomainEventType
+        from app.modules.notification import service as notifications
+        from app.modules.notification.models import DomainEvent, Notification
         from app.modules.moderation.models import AuditLog
         await self.published()
         correction = await self.correction()
@@ -141,7 +143,23 @@ class Beta5DatabaseTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(self.resource.resource_type, "exam")
         self.assertEqual(self.resource.revision, 2)
         self.assertEqual(self.resource.published_version_id, self.version.id)
-        self.assertTrue((await self.db.execute(select(Notification).where(Notification.user_id == self.other.id))).scalars().all())
+        # 处理结果随业务提交进入 outbox，再由独立消费者投递一次通知。
+        await self.db.commit()
+        event_id = await self.db.scalar(select(DomainEvent.id).where(
+            DomainEvent.event_type == DomainEventType.CORRECTION_RESOLVED.value,
+            DomainEvent.subject_id == correction.id,
+        ))
+        self.assertIsNotNone(event_id)
+        async with self.factory() as consumer_db:
+            self.assertTrue(await notifications._process_event(consumer_db, event_id))
+            self.assertFalse(await notifications._process_event(consumer_db, event_id))
+        notices = (await self.db.scalars(select(Notification).where(
+            Notification.user_id == self.other.id,
+            Notification.type == "correction_result",
+        ))).all()
+        self.assertEqual(len(notices), 1)
+        self.assertEqual(notices[0].data["correction_id"], str(correction.id))
+        self.assertEqual(notices[0].data["status"], "fixed")
         self.assertTrue((await self.db.execute(select(AuditLog).where(AuditLog.action == "resource.classification_corrected"))).scalars().all())
         with self.assertRaises(Conflict):
             await interaction.apply_classification_fix(self.db, correction_id=correction.id,

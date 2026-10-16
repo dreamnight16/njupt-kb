@@ -24,7 +24,7 @@ from app.core.errors import Conflict, Forbidden, InvalidInput, NotFound, RateLim
 from app.core.events import emit_event
 from app.core.pagination import CursorPage
 from app.core.ratelimit import check_rate_limit
-from app.modules.moderation.models import AppealStatus, CommentAppeal, Report
+from app.modules.moderation.models import AppealStatus, CommentAppeal, Report, ReportEvent
 from app.modules.moderation.schemas import CommentAppealOut, CommentReportOut
 from app.modules.moderation.service import _page
 
@@ -219,6 +219,11 @@ async def create_comment_report(
     db.add(report)
     await db.flush()
 
+    db.add(ReportEvent(
+        report_id=report.id, actor_id=reporter.id,
+        from_status=None, to_status=ReportStatus.OPEN,
+    ))
+
     await emit_event(
         db,
         event_type=DomainEventType.REPORT_CREATED,
@@ -337,6 +342,11 @@ async def decide_comment_report(
             details={"status": str(report.status)},
         )
     await db.refresh(report)
+
+    db.add(ReportEvent(
+        report_id=report.id, actor_id=actor.id,
+        from_status=current.value, to_status=target.value, note=reason,
+    ))
 
     if target == ReportStatus.RESOLVED:
         await emit_event(

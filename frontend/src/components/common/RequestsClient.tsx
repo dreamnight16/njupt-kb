@@ -30,23 +30,29 @@ const statusTones: Record<string, string> = {
   closed: 'bg-steel text-on-color',
 };
 
-export function RequestsClient({ initialCourse, initialOpen }: {
+type RequestSort = 'latest' | 'hot';
+
+export function RequestsClient({ initialCourse, initialOpen, initialSort = 'latest', initialKeyword = '' }: {
   initialCourse: CourseDetail | null;
   initialOpen: boolean;
+  /** 初始排序：URL ?sort=hot 带入；切换后由组件状态维护。 */
+  initialSort?: RequestSort;
+  initialKeyword?: string;
 }) {
   const queryClient = useQueryClient();
   const { status: sessionStatus, user } = useAuthStore();
   const authed = sessionStatus === 'authenticated';
 
   const [statusFilter, setStatusFilter] = useState<'open' | 'all'>('open');
+  const [sort, setSort] = useState<RequestSort>(initialSort);
   const [formOpen, setFormOpen] = useState(initialOpen);
   const [followed, setFollowed] = useState<Record<string, boolean>>({});
 
   const listQuery = useInfiniteQuery({
     initialPageParam: null as string | null,
-    queryKey: ['requests', statusFilter, initialCourse?.id, user?.id],
+    queryKey: ['requests', statusFilter, sort, initialCourse?.id, user?.id],
     queryFn: ({ pageParam }) =>
-      listRequests({ course_id: initialCourse?.id, cursor: pageParam, status: statusFilter === 'all' ? undefined : 'open', limit: 20 }),
+      listRequests({ course_id: initialCourse?.id, cursor: pageParam, sort, status: statusFilter === 'all' ? undefined : 'open', limit: 20 }),
     getNextPageParam: page => page.has_more ? page.next_cursor : undefined,
   });
 
@@ -103,6 +109,28 @@ export function RequestsClient({ initialCourse, initialOpen }: {
             </button>
           ))}
         </div>
+        <div className="flex items-center gap-2" role="group" aria-label="排序方式">
+          {(
+            [
+              ['latest', '最新'],
+              ['hot', '最热'],
+            ] as const
+          ).map(([value, label]) => (
+            <button
+              key={value}
+              type="button"
+              aria-pressed={sort === value}
+              onClick={() => setSort(value)}
+              className={`inline-flex min-h-11 items-center px-3 text-sm font-medium ${
+                sort === value
+                  ? 'bg-brand text-on-color'
+                  : 'border border-control-border text-text-primary hover:bg-canvas'
+              }`}
+            >
+              {label}
+            </button>
+          ))}
+        </div>
         <Button variant="primary" onClick={() => setFormOpen((open) => !open)}>
           {formOpen ? '收起' : '提出需求'}
         </Button>
@@ -111,6 +139,7 @@ export function RequestsClient({ initialCourse, initialOpen }: {
       {formOpen && (
         <RequestForm
           initialCourse={initialCourse}
+          initialKeyword={initialKeyword}
           onDone={() => {
             setFormOpen(false);
             queryClient.invalidateQueries({ queryKey: ['requests'] });
@@ -197,7 +226,9 @@ export function RequestsClient({ initialCourse, initialOpen }: {
         <EmptyState
           title={statusFilter === 'open' ? '当前没有进行中的需求' : '还没有资料需求'}
           description={
-            statusFilter === 'open'
+            sort === 'hot'
+              ? '最热榜仅统计近 7 天创建的开放需求，可切换到「最新」查看全部。'
+              : statusFilter === 'open'
               ? '可先浏览课程寻找现有资料。'
               : '切换到「寻找中」查看进行中的需求。'
           }
@@ -207,13 +238,16 @@ export function RequestsClient({ initialCourse, initialOpen }: {
   );
 }
 
-function RequestForm({ onDone, initialCourse }: { onDone: () => void; initialCourse: CourseDetail | null }) {
+function RequestForm({ onDone, initialCourse, initialKeyword }: { onDone: () => void; initialCourse: CourseDetail | null; initialKeyword: string }) {
   const authed = useAuthStore((state) => state.status === 'authenticated');
-  const loginNext = initialCourse ? `/requests?course_id=${initialCourse.id}&new=1` : '/requests?new=1';
+  const loginParams = new URLSearchParams({ new: '1' });
+  if (initialCourse) loginParams.set('course_id', initialCourse.id);
+  if (initialKeyword) loginParams.set('keyword', initialKeyword);
+  const loginNext = `/requests?${loginParams}`;
   const [query, setQuery] = useState('');
   const [selected, setSelected] = useState<Pick<CourseListItem, 'id' | 'name' | 'code' | 'college_name'> | null>(initialCourse);
   const [scope, setScope] = useState('');
-  const [description, setDescription] = useState('');
+  const [description, setDescription] = useState(initialKeyword);
 
   const courseSearch = useQuery({
     queryKey: ['request-course-search', query],
@@ -296,7 +330,12 @@ function RequestForm({ onDone, initialCourse }: { onDone: () => void; initialCou
         {!selected && courseSearch.isFetching && (
           <p className="mt-2 text-xs text-text-secondary">搜索中…</p>
         )}
-        {!selected && query.trim() && !courseSearch.isFetching && courses.length === 0 && (
+        {!selected && courseSearch.error && (
+          <Notice tone="warning" title="课程搜索失败" action={<Button type="button" variant="secondary" onClick={() => courseSearch.refetch()}>重试</Button>}>
+            {describeError(courseSearch.error).message}
+          </Notice>
+        )}
+        {!selected && query.trim() && !courseSearch.error && !courseSearch.isFetching && courses.length === 0 && (
           <p className="mt-2 text-xs text-text-secondary">没有匹配的课程，请换个关键词。</p>
         )}
       </div>

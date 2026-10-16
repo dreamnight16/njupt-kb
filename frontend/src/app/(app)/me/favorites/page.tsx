@@ -1,11 +1,13 @@
 'use client';
 
 import Link from 'next/link';
+import { Heart } from 'lucide-react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import toast from 'react-hot-toast';
 
 import { Notice } from '@/components/common/Notice';
 import { Button } from '@/components/ui/Button';
+import { EmptyState } from '@/components/ui/EmptyState';
 import { SkeletonList } from '@/components/ui/Skeleton';
 import { describeError } from '@/lib/api/client';
 import { listFavorites, removeFavorite } from '@/lib/api/interaction';
@@ -105,9 +107,11 @@ export default function MyFavoritesPage() {
           ))}
         </ul>
       ) : (
-        <Notice tone="info" title="还没有收藏">
-          在资料详情页收藏后显示在这里。
-        </Notice>
+        <EmptyState
+          icon={Heart}
+          title="还没有收藏"
+          description="在资料详情页收藏后显示在这里。"
+        />
       )}
     </div>
   );

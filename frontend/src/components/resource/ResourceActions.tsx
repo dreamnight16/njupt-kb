@@ -133,6 +133,7 @@ export function ResourceActions({
       setSuggestedCourse('');
       setSuggestedType('');
       toast.success(kind === 'correction' ? '纠错已提交，会进入独立工单处理' : '举报已提交，会进入独立工单处理');
+      queryClient.invalidateQueries({ queryKey: [kind === 'report' ? 'my-reports' : 'my-corrections'] });
     },
     onError: (error) => toast.error(describeError(error).message),
   });

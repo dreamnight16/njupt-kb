@@ -144,6 +144,23 @@ export async function revokeSession(sessionId: string): Promise<void> {
   await api.delete(`/me/sessions/${sessionId}`);
 }
 
+export interface ChangePasswordRequest {
+  current_password: string;
+  new_password: string;
+}
+
+/** 登录态修改密码：成功后其他设备会话被撤销，当前会话保留。 */
+export async function changePassword(payload: ChangePasswordRequest): Promise<ActionMessage> {
+  const { data } = await api.post<ActionMessage>('/me/password', payload);
+  return data;
+}
+
+/** 一键退出其他设备：撤销除当前会话外的全部会话。 */
+export async function revokeOtherSessions(): Promise<ActionMessage> {
+  const { data } = await api.post<ActionMessage>('/me/sessions/revoke-others');
+  return data;
+}
+
 export interface DeleteAccountRequest {
   /** 当前密码：服务端复用既有密码校验实现，不另发明哈希逻辑。 */
   password: string;

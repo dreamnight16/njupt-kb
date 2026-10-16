@@ -16,7 +16,7 @@ import {
   type CursorPage,
   type ResourceType,
 } from '@/lib/api/types';
-import { isUuid } from '@/lib/utils';
+import { firstSearchParam, isUuid } from '@/lib/utils';
 
 export const dynamic = 'force-dynamic';
 
@@ -64,14 +64,25 @@ export default async function CourseDetailPage({
   searchParams,
 }: {
   params: Promise<{ id: string }>;
-  searchParams: Promise<{ type?: string }>;
+  searchParams: Promise<Partial<Record<'type' | 'cursor' | 'sort', string | string[]>>>;
 }) {
   const { id } = await params;
   if (!isUuid(id)) notFound();
 
-  const { type } = await searchParams;
+  const rawParams = await searchParams;
+  const type = firstSearchParam(rawParams.type);
+  const cursor = firstSearchParam(rawParams.cursor);
+  const rawSort = firstSearchParam(rawParams.sort);
+  const sort = rawSort === 'oldest' || rawSort === 'hot' ? rawSort : 'latest';
   const typeFilter: ResourceType | undefined =
     type && isResourceType(type) ? type : undefined;
+  function resourceLink(nextType: ResourceType | null = typeFilter ?? null, nextSort = sort, nextCursor?: string) {
+    const query = new URLSearchParams();
+    if (nextType) query.set('type', nextType);
+    if (nextSort !== 'latest') query.set('sort', nextSort);
+    if (nextCursor) query.set('cursor', nextCursor);
+    return `/courses/${id}${query.size ? `?${query}` : ''}`;
+  }
 
   const courseResult = await loadCourse(id);
   if (courseResult.error?.status === 404) notFound();
@@ -80,7 +91,7 @@ export default async function CourseDetailPage({
   const [offeringsResult, resourcesResult] = await Promise.all([
     serverFetch<OfferingItem[]>(`/courses/${id}/offerings`),
     serverFetch<CursorPage<ResourceListItem>>(
-      `/resources?course_id=${id}${typeFilter ? `&resource_type=${typeFilter}` : ''}&limit=20`,
+      `/resources?course_id=${id}${typeFilter ? `&resource_type=${typeFilter}` : ''}&sort=${sort}${cursor ? `&cursor=${encodeURIComponent(cursor)}` : ''}&limit=20`,
     ),
   ]);
 
@@ -91,6 +102,11 @@ export default async function CourseDetailPage({
       </Notice>
     );
   }
+
+  // 分类计数只列有可见资源的类型，顺序与类型筛选项一致。
+  const countedTypes = RESOURCE_TYPE_ORDER.filter(
+    (resourceType) => (course.resource_counts?.[resourceType] ?? 0) > 0,
+  );
 
   return (
     <div className="space-y-8">
@@ -132,9 +148,17 @@ export default async function CourseDetailPage({
         <h2 id="course-resources" className="dn-display text-2xl">
           分类资料
         </h2>
+        {/* 分类计数（beta14）：与列表口径一致，只统计当前用户可见的已发布资源。 */}
+        {countedTypes.length > 0 && (
+          <p className="mt-2 text-sm text-text-secondary">
+            {countedTypes
+              .map((resourceType) => `${RESOURCE_TYPE_LABELS[resourceType]} ${course.resource_counts?.[resourceType] ?? 0}`)
+              .join(' · ')}
+          </p>
+        )}
         <div className="mt-3 flex flex-wrap gap-2">
           <Link
-            href={`/courses/${id}`}
+            href={resourceLink(null, sort)}
             className={`inline-flex min-h-11 items-center px-3 text-sm font-medium ${
               !typeFilter
                 ? 'bg-brand text-on-color'
@@ -146,7 +170,7 @@ export default async function CourseDetailPage({
           {RESOURCE_TYPE_ORDER.map((resourceType) => (
             <Link
               key={resourceType}
-              href={`/courses/${id}?type=${resourceType}`}
+              href={resourceLink(resourceType)}
               className={`inline-flex min-h-11 items-center px-3 text-sm font-medium ${
                 typeFilter === resourceType
                   ? 'bg-brand text-on-color'
@@ -157,6 +181,12 @@ export default async function CourseDetailPage({
             </Link>
           ))}
         </div>
+
+        <nav aria-label="课程资料排序" className="mt-3 flex flex-wrap gap-4 text-sm">
+          {([['latest', '最新'], ['oldest', '最早'], ['hot', '热门']] as const).map(([value, label]) => (
+            <Link key={value} href={resourceLink(typeFilter ?? null, value)} aria-current={sort === value ? 'true' : undefined} className={`min-h-11 content-center underline ${sort === value ? 'font-semibold text-brand' : 'text-text-secondary'}`}>{label}</Link>
+          ))}
+        </nav>
 
         <div className="mt-4">
           {resourcesResult.error ? (
@@ -184,6 +214,10 @@ export default async function CourseDetailPage({
                 : '登录后可为这门课上传资料。'}
             </Notice>
           )}
+        </div>
+        <div className="mt-4 flex flex-wrap gap-4 text-sm">
+          {cursor && <Link href={resourceLink()} className="min-h-11 content-center text-brand underline">回到第一页</Link>}
+          {resourcesResult.data?.has_more && resourcesResult.data.next_cursor && <Link href={resourceLink(typeFilter ?? null, sort, resourcesResult.data.next_cursor)} className="min-h-11 content-center text-brand underline">下一页资料</Link>}
         </div>
       </section>
 

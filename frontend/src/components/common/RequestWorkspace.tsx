@@ -9,6 +9,7 @@ import {
 } from "@tanstack/react-query";
 import toast from "react-hot-toast";
 import { Button } from "@/components/ui/Button";
+import { EmptyState } from "@/components/ui/EmptyState";
 import { Modal } from "@/components/ui/Modal";
 import { Notice } from "@/components/common/Notice";
 import { api, describeError } from "@/lib/api/client";
@@ -308,9 +309,12 @@ export function RequestWorkspace({ requestId }: { requestId: string }) {
           </Notice>
         ) : responses.isPending ? (
           <p role="status">正在加载回应…</p>
-        ) : responses.data?.pages.every((p) => p.items.length === 0) ? (
-          <p className="mt-3 text-text-secondary">还没有候选资料。</p>
-        ) : (
+      ) : responses.data?.pages.every((p) => p.items.length === 0) ? (
+        <EmptyState
+          title="还没有候选资料"
+          description="可以在上方搜索并提交本课程的资料作为候选。"
+        />
+      ) : (
           <ul className="mt-3 space-y-3">
             {responses.data?.pages
               .flatMap((p) => p.items)

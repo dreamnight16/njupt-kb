@@ -170,7 +170,12 @@ function SearchResults() {
       ) : items.length === 0 ? (
         <Notice tone="info" title="没有匹配的资料">
           <p>可以换一个关键词，或放宽资料类型与年份筛选。</p>
-          <Link href="/requests?new=1" className="mt-2 inline-flex min-h-11 items-center underline">没找到？提出资料需求</Link>
+          <Link
+            href={q ? `/requests?new=1&keyword=${encodeURIComponent(q)}` : '/requests?new=1'}
+            className="mt-2 inline-flex min-h-11 items-center underline"
+          >
+            没找到？发起求资料
+          </Link>
         </Notice>
       ) : (
         <>

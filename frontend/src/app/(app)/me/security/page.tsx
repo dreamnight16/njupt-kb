@@ -11,11 +11,13 @@ import { Button } from '@/components/ui/Button';
 import { Input } from '@/components/ui/Input';
 import { SkeletonList } from '@/components/ui/Skeleton';
 import {
+  changePassword,
   deleteAccount,
   exportMyData,
   listSessions,
   requestEmailVerification,
   requestPasswordReset,
+  revokeOtherSessions,
   revokeSession,
   updateMe,
 } from '@/lib/api/auth';
@@ -32,13 +34,18 @@ export default function SecurityPage() {
   const queryClient = useQueryClient();
   const [displayName, setDisplayName] = useState(user?.display_name ?? '');
   const [confirmRevoke, setConfirmRevoke] = useState<string | null>(null);
+  const [revokingOthers, setRevokingOthers] = useState(false);
   const [password, setPassword] = useState('');
   const [confirmPhrase, setConfirmPhrase] = useState('');
   const [confirmingDeletion, setConfirmingDeletion] = useState(false);
+  const [currentPassword, setCurrentPassword] = useState('');
+  const [newPassword, setNewPassword] = useState('');
+  const [confirmPassword, setConfirmPassword] = useState('');
 
   const sessionsQuery = useQuery({
-    queryKey: ['sessions'],
+    queryKey: ['sessions', user?.id],
     queryFn: () => listSessions(),
+    enabled: !!user,
   });
 
   const profileMutation = useMutation({
@@ -74,6 +81,41 @@ export default function SecurityPage() {
     },
     onError: (error) => toast.error(describeError(error).message),
   });
+
+  const revokeOthersMutation = useMutation({
+    mutationFn: () => revokeOtherSessions(),
+    onSuccess: (result) => {
+      toast.success(result.message);
+      setRevokingOthers(false);
+      queryClient.invalidateQueries({ queryKey: ['sessions'] });
+    },
+    onError: (error) => toast.error(describeError(error).message),
+  });
+
+  const changePasswordMutation = useMutation({
+    mutationFn: () =>
+      changePassword({
+        current_password: currentPassword,
+        new_password: newPassword,
+      }),
+    onSuccess: (result) => {
+      toast.success(result.message);
+      setCurrentPassword('');
+      setNewPassword('');
+      setConfirmPassword('');
+      // 其他设备会话已被服务端撤销，刷新列表。
+      queryClient.invalidateQueries({ queryKey: ['sessions'] });
+    },
+    onError: (error) => toast.error(describeError(error).message),
+  });
+
+  const passwordMismatch =
+    confirmPassword.length > 0 && confirmPassword !== newPassword;
+  const canSubmitPassword =
+    currentPassword.length > 0 &&
+    newPassword.length > 0 &&
+    confirmPassword.length > 0 &&
+    !passwordMismatch;
 
   const exportMutation = useMutation({
     mutationFn: () => exportMyData(),
@@ -241,6 +283,33 @@ export default function SecurityPage() {
             </Notice>
           )}
         </div>
+        <div className="mt-4">
+          {revokingOthers ? (
+            <div className="flex flex-wrap items-center gap-2">
+              <span className="text-sm text-text-secondary">
+                将撤销除当前设备外的全部会话，其他设备需要重新登录。确认继续？
+              </span>
+              <Button
+                variant="danger"
+                onClick={() => revokeOthersMutation.mutate()}
+                isLoading={revokeOthersMutation.isPending}
+              >
+                确认退出其他设备
+              </Button>
+              <Button
+                variant="ghost"
+                onClick={() => setRevokingOthers(false)}
+                disabled={revokeOthersMutation.isPending}
+              >
+                取消
+              </Button>
+            </div>
+          ) : (
+            <Button variant="secondary" onClick={() => setRevokingOthers(true)}>
+              退出所有其他设备
+            </Button>
+          )}
+        </div>
       </section>
 
       <section aria-labelledby="password" className="border border-divider bg-surface p-6">
@@ -258,6 +327,62 @@ export default function SecurityPage() {
           >
             发送重置密码说明
           </Button>
+        </div>
+
+        <div className="mt-6 border-t border-divider pt-6">
+          <h3 className="text-base font-medium text-text-primary">修改密码</h3>
+          <p className="mt-2 text-sm text-text-secondary">
+            修改成功后，其他设备上的会话会退出，当前设备保持登录。
+          </p>
+          <div className="mt-4 max-w-md space-y-4">
+            <Input
+              label="当前密码"
+              type="password"
+              autoComplete="current-password"
+              value={currentPassword}
+              onChange={(event) => setCurrentPassword(event.target.value)}
+            />
+            <Input
+              label="新密码"
+              type="password"
+              autoComplete="new-password"
+              value={newPassword}
+              onChange={(event) => setNewPassword(event.target.value)}
+            />
+            <Input
+              label="确认新密码"
+              type="password"
+              autoComplete="new-password"
+              value={confirmPassword}
+              onChange={(event) => setConfirmPassword(event.target.value)}
+              error={passwordMismatch ? '两次输入的新密码不一致' : undefined}
+            />
+            {changePasswordMutation.isError && (
+              <Notice
+                tone="error"
+                title="密码未修改"
+                action={
+                  <Button
+                    variant="danger"
+                    onClick={() => changePasswordMutation.mutate()}
+                    isLoading={changePasswordMutation.isPending}
+                    disabled={!canSubmitPassword}
+                  >
+                    重试
+                  </Button>
+                }
+              >
+                {describeError(changePasswordMutation.error).message}
+              </Notice>
+            )}
+            <Button
+              onClick={() => changePasswordMutation.mutate()}
+              isLoading={changePasswordMutation.isPending}
+              disabled={!canSubmitPassword}
+            >
+              修改密码
+            </Button>
+          </div>
         </div>
       </section>
 

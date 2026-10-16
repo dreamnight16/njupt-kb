@@ -34,6 +34,7 @@ from app.modules.identity.schemas import (
     LoginRequest,
     MeResponse,
     MeUpdateRequest,
+    PasswordChangeRequest,
     PasswordResetConfirmRequest,
     PasswordResetRequest,
     RegisterRequest,
@@ -269,6 +270,41 @@ async def revoke_session(
         db, user_id=user.id, session_id=parsed, request_id=request_id
     )
     return Response(status_code=status.HTTP_204_NO_CONTENT)
+
+
+@router.post("/me/password", response_model=ActionMessage)
+async def change_password(
+    payload: PasswordChangeRequest,
+    user: User = Depends(get_current_user),
+    session: Session = Depends(current_session),
+    db: AsyncSession = Depends(get_db),
+    request_id: str = Depends(get_request_id),
+    # 复用登录限流：改密接口可枚举旧密码，按同一把「登录」闸刀防爆破。
+    _rl: None = Depends(rate_limit("login")),
+) -> ActionMessage:
+    return await service.change_password(
+        db,
+        user=user,
+        current_session_id=session.id,
+        current_password=payload.current_password,
+        new_password=payload.new_password,
+        request_id=request_id,
+    )
+
+
+@router.post("/me/sessions/revoke-others", response_model=ActionMessage)
+async def revoke_other_sessions(
+    user: User = Depends(get_current_user),
+    session: Session = Depends(current_session),
+    db: AsyncSession = Depends(get_db),
+    request_id: str = Depends(get_request_id),
+) -> ActionMessage:
+    revoked = await service.revoke_other_sessions(
+        db, user_id=user.id, current_session_id=session.id, request_id=request_id
+    )
+    return ActionMessage(
+        message="已退出其他设备上的会话" if revoked else "当前没有其他活跃会话"
+    )
 
 
 @router.post("/me/deletion", response_model=ActionMessage)

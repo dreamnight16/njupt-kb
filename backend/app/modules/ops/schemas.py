@@ -5,6 +5,7 @@
 
 from __future__ import annotations
 
+import uuid
 from datetime import datetime
 
 from pydantic import BaseModel
@@ -43,4 +44,37 @@ class OpsAlertsOut(BaseModel):
 
     alerts: list[OpsAlertOut]
     has_critical: bool
+    generated_at: datetime
+
+
+class SecurityLoginFailureItem(BaseModel):
+    """单个账号近 1 小时的登录失败聚合（按账号分组）。
+
+    `identity.login_failed` 审计不记录 client_ip（record_audit 未传递来源 IP），
+    因此失败维度只按账号聚合，没有 IP 字段。
+    """
+
+    account: str  # 账号邮箱；未匹配到用户的失败归入「未知账号」
+    account_id: uuid.UUID | None
+    count: int
+    last_failed_at: datetime | None
+
+
+class SecurityNewIpLoginItem(BaseModel):
+    """近 24 小时内从该账号历史未出现过的 client_ip 发起的登录（按用户×IP 去重）。"""
+
+    account: str  # 账号邮箱；账号已注销时回退为「未知账号」
+    account_id: uuid.UUID
+    client_ip: str
+    first_seen_at: datetime
+
+
+class SecurityOverviewOut(BaseModel):
+    """安全运营视图：只读聚合，无缓存、无副作用（设计文档 §27）。"""
+
+    login_failures_last_hour: int  # 窗口内登录失败总数（含 Top 之外）
+    login_failure_top: list[SecurityLoginFailureItem]  # 最多 10 个账号
+    new_ip_login_count: int  # 近 24 小时新 IP 登录（用户×IP 去重）
+    new_ip_logins: list[SecurityNewIpLoginItem]  # 明细，最多 50 条
+    download_velocity_flagged_last_7d: int  # 近 7 天下载速率告警审计条数
     generated_at: datetime

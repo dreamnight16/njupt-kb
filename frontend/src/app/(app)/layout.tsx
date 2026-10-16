@@ -28,6 +28,15 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
             <Link href="/me/security" className="underline underline-offset-2 hover:text-text-primary">
               账号与安全
             </Link>
+            <Link href="/privacy" className="underline underline-offset-2 hover:text-text-primary">
+              隐私政策
+            </Link>
+            <Link href="/terms" className="underline underline-offset-2 hover:text-text-primary">
+              服务条款
+            </Link>
+            <Link href="/copyright" className="underline underline-offset-2 hover:text-text-primary">
+              版权与侵权投诉
+            </Link>
           </nav>
         </div>
       </footer>

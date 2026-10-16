@@ -8,7 +8,7 @@ from __future__ import annotations
 
 import uuid
 from datetime import datetime
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Literal
 
 from fastapi import APIRouter, Depends, Query, Response, status
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -25,7 +25,7 @@ from app.core.permissions import (
     USER_SUSPEND,
     require,
 )
-from app.modules.moderation import comment_reports, service
+from app.modules.moderation import comment_reports, personal, service
 from app.modules.moderation.models import AppealStatus
 from app.modules.moderation.schemas import (
     AuditLogOut,
@@ -41,6 +41,9 @@ from app.modules.moderation.schemas import (
     ModerationSummaryOut,
     PublicationIn,
     PublicationOut,
+    PersonalReportOut,
+    PersonalReportEventOut,
+    PersonalCommentAppealOut,
     ReportCreateIn,
     ReportEventIn,
     ReportEventOut,
@@ -55,6 +58,55 @@ if TYPE_CHECKING:  # pragma: no cover
     from app.modules.identity.models import User
 
 router = APIRouter()
+
+
+@router.get("/me/reports", response_model=CursorPage[PersonalReportOut])
+async def list_personal_reports(
+    kind: Literal["resource", "comment"] | None = Query(default=None),
+    report_status: list[ReportStatus] | None = Query(default=None, alias="status"),
+    limit: int | None = Query(default=None, ge=1, le=100),
+    cursor: str | None = Query(default=None),
+    user: "User" = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> CursorPage[PersonalReportOut]:
+    return await personal.list_reports(
+        db, user=user, kind=kind, statuses=report_status, limit=limit, cursor=cursor,
+    )
+
+
+@router.get("/me/reports/{report_id}", response_model=PersonalReportOut)
+async def get_personal_report(
+    report_id: uuid.UUID,
+    user: "User" = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> PersonalReportOut:
+    return await personal.get_report(db, user=user, report_id=report_id)
+
+
+@router.get("/me/reports/{report_id}/events", response_model=CursorPage[PersonalReportEventOut])
+async def list_personal_report_events(
+    report_id: uuid.UUID,
+    limit: int | None = Query(default=None, ge=1, le=100),
+    cursor: str | None = Query(default=None),
+    user: "User" = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> CursorPage[PersonalReportEventOut]:
+    return await personal.list_report_events(
+        db, user=user, report_id=report_id, limit=limit, cursor=cursor,
+    )
+
+
+@router.get("/me/comment-appeals", response_model=CursorPage[PersonalCommentAppealOut])
+async def list_personal_comment_appeals(
+    appeal_status: list[AppealStatus] | None = Query(default=None, alias="status"),
+    limit: int | None = Query(default=None, ge=1, le=100),
+    cursor: str | None = Query(default=None),
+    user: "User" = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> CursorPage[PersonalCommentAppealOut]:
+    return await personal.list_comment_appeals(
+        db, user=user, statuses=appeal_status, limit=limit, cursor=cursor,
+    )
 
 
 # --------------------------------------------------------------------------- #

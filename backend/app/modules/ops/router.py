@@ -2,7 +2,7 @@
 
 只做参数解析并调用 `service`；前缀由 `app/main.py` 统一加 `/api/v1`。
 工作台是管理员操作台：聚合了失败事件/任务，要求 `ops.view`（当前仅管理员拥有，
-不自动授予资料审核员）。
+不自动授予资料审核员）。安全运营视图要求 `audit.view`：与审计记录同级的安全聚合。
 """
 
 from __future__ import annotations
@@ -15,10 +15,14 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.deps import get_db, get_current_user
 from app.core.enums import AccountStatus, Role
 from app.core.pagination import CursorPage
-from app.core.permissions import OPS_VIEW, USER_SUSPEND, require
+from app.core.permissions import AUDIT_VIEW, OPS_VIEW, USER_SUSPEND, require
 from app.modules.ops import accounts, personal
 from app.modules.ops import service
-from app.modules.ops.schemas import OpsAlertsOut, WorkbenchOut
+from app.modules.ops.schemas import (
+    OpsAlertsOut,
+    SecurityOverviewOut,
+    WorkbenchOut,
+)
 
 if TYPE_CHECKING:  # pragma: no cover
     from app.modules.identity.models import User
@@ -41,6 +45,15 @@ async def get_alerts(
 ) -> OpsAlertsOut:
     """运营告警：达到阈值的指标才返回，供管理员优先处置（buchong.md）。"""
     return await service.check_ops_alerts(db)
+
+
+@router.get("/admin/security/overview", response_model=SecurityOverviewOut)
+async def get_security_overview(
+    user: "User" = Depends(require(AUDIT_VIEW)),
+    db: AsyncSession = Depends(get_db),
+) -> SecurityOverviewOut:
+    """安全运营视图：近 1 小时登录失败 Top、近 24 小时新 IP 登录、近 7 天下载速率告警审计的只读聚合。"""
+    return await service.security_overview(db)
 
 
 @router.get("/me/overview", response_model=personal.PersonalOverview)

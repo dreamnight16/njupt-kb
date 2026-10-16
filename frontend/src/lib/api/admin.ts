@@ -254,6 +254,36 @@ export async function getWorkbench(): Promise<WorkbenchOut> {
   return data;
 }
 
+// --- 管理员安全运营视图（backend/app/modules/ops/router.py）---
+
+export interface SecurityLoginFailureItem {
+  account: string;
+  account_id: string | null;
+  count: number;
+  last_failed_at: string | null;
+}
+
+export interface SecurityNewIpLoginItem {
+  account: string;
+  account_id: string;
+  client_ip: string;
+  first_seen_at: string;
+}
+
+export interface SecurityOverviewOut {
+  login_failures_last_hour: number;
+  login_failure_top: SecurityLoginFailureItem[];
+  new_ip_login_count: number;
+  new_ip_logins: SecurityNewIpLoginItem[];
+  download_velocity_flagged_last_7d: number;
+  generated_at: string;
+}
+
+export async function fetchSecurityOverview(): Promise<SecurityOverviewOut> {
+  const { data } = await api.get<SecurityOverviewOut>('/admin/security/overview');
+  return data;
+}
+
 // --- 管理员目录维护（backend/app/modules/catalog/router.py）---
 
 export type CatalogEntityType =

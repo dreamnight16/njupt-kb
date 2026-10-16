@@ -430,6 +430,8 @@ export async function createRequest(payload: {
 export async function listRequests(params: {
   course_id?: string;
   status?: string;
+  /** latest=最新（默认）；hot=近 7 天开放需求榜（按关注数）。 */
+  sort?: 'latest' | 'hot';
   cursor?: string | null;
   limit?: number;
 } = {}): Promise<CursorPage<RequestItem>> {

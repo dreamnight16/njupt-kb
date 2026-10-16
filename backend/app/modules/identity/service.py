@@ -43,6 +43,7 @@ from app.core.security import (
     token_digest,
     verify_password,
 )
+from app.db import async_session_factory
 from app.modules.identity.models import AuthToken, Session, User, UserIdentity, UserProfile
 from app.modules.identity.schemas import ActionMessage, MeResponse, SessionItem
 
@@ -181,14 +182,22 @@ def display_name_of(user: User) -> str:
     return name or "用户"
 
 
-async def revoke_all_sessions(db: AsyncSession, user_id: uuid.UUID, *, reason: str) -> int:
-    """改密、封禁、管理员撤销都通过这里使会话失效（§14.2）。返回被撤销的会话数。"""
-    result = await db.execute(
+async def revoke_all_sessions(
+    db: AsyncSession, user_id: uuid.UUID, *, reason: str,
+    keep_session_id: uuid.UUID | None = None,
+) -> int:
+    """改密、封禁、管理员撤销都通过这里使会话失效（§14.2）。返回被撤销的会话数。
+
+    keep_session_id 供「保留当前会话、撤销其余」的场景（beta14 改密与一键退出其他设备）。
+    """
+    stmt = (
         update(Session)
         .where(Session.user_id == user_id, Session.revoked_at.is_(None))
         .values(revoked_at=_now(), revoke_reason=reason)
-        .execution_options(synchronize_session=False)
     )
+    if keep_session_id is not None:
+        stmt = stmt.where(Session.id != keep_session_id)
+    result = await db.execute(stmt.execution_options(synchronize_session=False))
     return result.rowcount or 0
 
 
@@ -367,15 +376,18 @@ async def _note_login_failure(
         limit=settings.LOGIN_FAILURE_LOCKOUT_THRESHOLD,
         window_seconds=LOGIN_FAILURE_WINDOW_SECONDS,
     )
-    await record_audit(
-        db,
-        action="identity.login_failed",
-        object_type="user",
-        object_id=user_id,
-        actor_id=user_id,
-        reason="bad_credentials",
-        request_id=request_id,
-    )
+    # 登录失败会使请求事务回滚，审计需独立提交，不能提交调用方业务事务。
+    async with async_session_factory() as audit_db:
+        await record_audit(
+            audit_db,
+            action="identity.login_failed",
+            object_type="user",
+            object_id=user_id,
+            actor_id=user_id,
+            reason="bad_credentials",
+            request_id=request_id,
+        )
+        await audit_db.commit()
     if not allowed:
         # 达阈值只延迟，不永久锁定；窗口滑动后自动恢复（§14.2、§28）。
         await asyncio.sleep(LOGIN_FAILURE_DELAY_SECONDS)
@@ -413,6 +425,16 @@ async def login(
         )
         raise Unauthenticated("邮箱或密码不正确")
 
+    # 同一账号登录串行创建和淘汰会话，防止并发请求各自观察到未超限。
+    verified_hash = user.password_hash
+    user = (await db.execute(
+        select(User).where(User.id == user.id).with_for_update()
+        .execution_options(populate_existing=True)
+    )).scalar_one()
+    if user.password_hash != verified_hash and not verify_password(password, user.password_hash):
+        # 等锁期间密码可能已修改；不在持有用户锁时开启审计写事务。
+        raise Unauthenticated("邮箱或密码不正确")
+
     # 封禁不能登录；暂停仍可登录查看申诉入口（§14.1）。
     if user.status in (AccountStatus.BANNED, AccountStatus.DELETED):
         raise Forbidden("账号当前不可用", details={"status": user.status})
@@ -433,6 +455,39 @@ async def login(
     )
     db.add(session)
     await db.flush()
+
+    # 并发会话上限（beta14）：超限时按 issued_at 升序淘汰最旧会话，仅记审计、不阻断本次登录。
+    # 新会话 issued_at 最新，天然排在末尾不被淘汰。
+    max_active = settings.SESSION_MAX_ACTIVE_PER_USER
+    if max_active > 0:
+        active = list(
+            (
+                await db.execute(
+                    select(Session)
+                    .where(
+                        Session.user_id == user.id,
+                        Session.revoked_at.is_(None),
+                        Session.expires_at > now,
+                    )
+                    .order_by(Session.issued_at.asc(), Session.id.asc())
+                )
+            )
+            .scalars()
+            .all()
+        )
+        for stale in active[: max(len(active) - max_active, 0)]:
+            stale.revoked_at = now
+            stale.revoke_reason = "session_limit"
+            await record_audit(
+                db,
+                action="identity.session_limit_evicted",
+                object_type="session",
+                object_id=stale.id,
+                actor_id=user.id,
+                reason="超过并发会话上限",
+                after={"max_active": max_active},
+                request_id=request_id,
+            )
 
     await record_audit(
         db,
@@ -553,6 +608,70 @@ async def revoke_session(
         actor_id=user_id,
         request_id=request_id,
     )
+
+
+# --- 登录态密码修改与一键退出其他设备（beta14）------------------------------------------
+
+
+async def change_password(
+    db: AsyncSession,
+    *,
+    user: User,
+    current_session_id: uuid.UUID,
+    current_password: str,
+    new_password: str,
+    request_id: str | None,
+) -> ActionMessage:
+    """登录态修改密码：校验旧密码 → 强度校验 → 更新哈希 → 保留当前会话、撤销其余（§14.2）。
+
+    旧密码错误统一按 InvalidInput 拒绝，不区分「用户不存在」与「密码错误」；
+    审计只记录撤销数量，不记录任何密码。
+    """
+    if not verify_password(current_password, user.password_hash):
+        raise InvalidInput("当前密码不正确", code="PASSWORD_INCORRECT")
+    # 复用注册/重置时同一套强度校验，避免多处密码规则漂移。
+    problem = password_problem(new_password)
+    if problem:
+        raise InvalidInput(problem)
+
+    user.password_hash = hash_password(new_password)
+    revoked = await revoke_all_sessions(
+        db, user.id, reason="password_change", keep_session_id=current_session_id
+    )
+
+    await record_audit(
+        db,
+        action="identity.password_changed",
+        object_type="user",
+        object_id=user.id,
+        actor_id=user.id,
+        after={"revoked_other_sessions": revoked},
+        request_id=request_id,
+    )
+    return ActionMessage(message="密码已修改，其他设备上的会话已退出，当前会话保持不变")
+
+
+async def revoke_other_sessions(
+    db: AsyncSession,
+    *,
+    user_id: uuid.UUID,
+    current_session_id: uuid.UUID,
+    request_id: str | None,
+) -> int:
+    """一键退出其他设备：撤销除当前会话外的全部会话（§14.2）。返回被撤销的会话数。"""
+    revoked = await revoke_all_sessions(
+        db, user_id, reason="user_revoked_others", keep_session_id=current_session_id
+    )
+    await record_audit(
+        db,
+        action="identity.other_sessions_revoked",
+        object_type="user",
+        object_id=user_id,
+        actor_id=user_id,
+        after={"revoked_sessions": revoked},
+        request_id=request_id,
+    )
+    return revoked
 
 
 # --- 找回密码 ------------------------------------------------------------------------------

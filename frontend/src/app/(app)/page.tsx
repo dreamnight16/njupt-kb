@@ -104,7 +104,7 @@ export default async function HomePage() {
               近期内容
             </h2>
           </div>
-          <Link href="/search" className="text-sm text-text-secondary underline underline-offset-2">
+          <Link href="/resources" className="text-sm text-text-secondary underline underline-offset-2">
             更多结果
           </Link>
         </div>

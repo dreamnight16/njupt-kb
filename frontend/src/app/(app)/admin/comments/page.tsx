@@ -2,7 +2,9 @@
 import Link from "next/link";
 import { useState } from "react";
 import { useInfiniteQuery } from "@tanstack/react-query";
+import { MessageSquare } from "lucide-react";
 import { Button } from "@/components/ui/Button";
+import { EmptyState } from "@/components/ui/EmptyState";
 import { Notice } from "@/components/common/Notice";
 import { api, describeError } from "@/lib/api/client";
 import type { CursorPage } from "@/lib/api/types";
@@ -45,7 +47,11 @@ function Queue() {
       ) : query.isPending ? (
         <p role="status">正在加载…</p>
       ) : query.data?.pages.every((p) => !p.items.length) ? (
-        <Notice title="没有符合条件的评论" />
+        <EmptyState
+          icon={MessageSquare}
+          title="没有符合条件的评论"
+          description="可切换「只看已隐藏」筛选，或前往资料讨论区处理。"
+        />
       ) : (
         <ul className="space-y-3">
           {query.data?.pages

@@ -277,3 +277,24 @@ async def request_process(
 # AI_ENABLED=false 时抛 NotEnabled，不返回假结果（§23、§25.2）。
 async def process_result(db: AsyncSession, process_id: uuid.UUID) -> AIProcess
 ```
+
+
+## beta14 增补
+
+| 接口 | 权限与契约 |
+| --- | --- |
+| `POST /me/password` | 登录；`current_password` / `new_password`（1–300 字），校验现有密码和统一强度规则；保留当前会话、撤销其余；复用登录频控；返回 ActionMessage |
+| `POST /me/sessions/revoke-others` | 登录；保留当前会话、撤销本人其余会话；返回 ActionMessage |
+| `GET /admin/security/overview` | `audit.view`；只读，1 小时失败登录 Top 10、24 小时新 IP 登录最多 50 条及总数、7 天下载速率审计数 |
+| `GET /me/reports` | 登录；仅本人；`kind=resource/comment`、`status`、`cursor`、`limit`；CursorPage |
+| `GET /me/reports/{id}` | 登录；仅本人，其他用户（含管理员）一律 404；PersonalReportOut |
+| `GET /me/reports/{id}/events` | 登录；仅本人；cursor/limit；仅状态前后与时间，不返回 note/evidence/actor |
+| `GET /me/comment-appeals` | 登录；仅本人；status/cursor/limit；不返回内部处理理由或处理人 |
+| `GET /resources?sort=hot` | 与 latest/oldest 相同可见性；收藏+consumed 下载授权时间衰减排序；游标含 s/id/at，固定首屏时间，不与时间游标混用 |
+| `GET /requests?sort=hot` | 近 7 天开放需求按关注数排序，游标与 latest 独立；资源解决方案仍按查看者遮蔽 |
+
+课程详情 `resource_counts` 按资料类型统计当前用户可见资料；资料详情新增 `download_count`（仅 consumed 授权）、`favorite_count`、`rating_summary`。规则推荐在既有过滤基础上增加当前培养方案专业/学院相关信号，不扩大可见范围。本人治理 DTO 对不可读/非当前公开版本遮蔽目标，工单可读不授予目标访问权。
+
+`update_correction_status` 只在业务事务内写 `CORRECTION_RESOLVED` 事件；worker 消费才生成站内通知，不再同步重复写通知。事件载荷保留发生时的处理人，通知重试按事件去重，`open` 状态不产生结果通知。
+
+配置：`SESSION_MAX_ACTIVE_PER_USER=5`（0 不限），`DOWNLOAD_VELOCITY_WINDOW_SECONDS=300`、`DOWNLOAD_VELOCITY_WINDOW_COUNT=30`、`HOT_SCORE_TIME_DECAY_DAYS=14`、`HOT_SCORE_DECAY_POWER=1.5`；均为可调默认值。无新增数据库迁移。

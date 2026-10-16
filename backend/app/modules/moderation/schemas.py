@@ -146,6 +146,43 @@ class ReportEventOut(_ORMModel):
     created_at: datetime
 
 
+class PersonalReportOut(BaseModel):
+    id: uuid.UUID
+    kind: Literal["resource", "comment"]
+    available: bool
+    resource_id: uuid.UUID | None = None
+    version_id: uuid.UUID | None = None
+    comment_id: uuid.UUID | None = None
+    title: str | None = None
+    reason_code: str
+    description: str | None = None
+    status: ReportStatus
+    created_at: datetime
+    updated_at: datetime
+
+
+class PersonalReportEventOut(_ORMModel):
+    """本人进度只公开状态与时间，内部证据、处理人和备注仍留在治理端。"""
+
+    id: uuid.UUID
+    from_status: ReportStatus | None = None
+    to_status: ReportStatus
+    created_at: datetime
+
+
+class PersonalCommentAppealOut(BaseModel):
+    id: uuid.UUID
+    available: bool
+    resource_id: uuid.UUID | None = None
+    comment_id: uuid.UUID | None = None
+    title: str | None = None
+    reason: str
+    status: Literal["pending", "accepted", "rejected"]
+    handled_at: datetime | None = None
+    created_at: datetime
+    updated_at: datetime
+
+
 # --- 评论举报与申诉（§18、§20.2）---
 
 

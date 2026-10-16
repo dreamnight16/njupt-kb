@@ -145,3 +145,14 @@ export const RESOURCE_TYPE_LABELS: Record<ResourceType, string> = {
 export function isResourceType(value: string): value is ResourceType {
   return (RESOURCE_TYPE_ORDER as string[]).includes(value);
 }
+
+/**
+ * 资源详情页计数（beta14）：后端随资源详情接口自动附带。
+ * 字段与 backend ResourceDetailOut 对应；docs/INTERFACES.md 收口前按可选字段读取。
+ * 评分字段与 interaction.RatingSummary 一致。
+ */
+export interface ResourceCountSummary {
+  download_count?: number;
+  favorite_count?: number;
+  rating_summary?: { average: number; count: number; shrunk: number } | null;
+}

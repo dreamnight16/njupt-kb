@@ -12,7 +12,7 @@ from typing import TYPE_CHECKING
 from fastapi import APIRouter, Depends, Query
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.core.deps import get_db, get_request_id, parse_uuid
+from app.core.deps import get_db, get_optional_user, get_request_id, parse_uuid
 from app.core.pagination import CursorPage
 from app.core.permissions import CATALOG_MANAGE, require
 from app.modules.catalog import service
@@ -75,9 +75,10 @@ async def list_courses(
 async def get_course(
     course_id: str,
     db: AsyncSession = Depends(get_db),
+    user: "User | None" = Depends(get_optional_user),
     _rl: None = Depends(rate_limit("browse")),
 ) -> CourseDetail:
-    return await service.get_course_detail(db, parse_uuid(course_id, "course_id"))
+    return await service.get_course_detail(db, parse_uuid(course_id, "course_id"), user=user)
 
 
 @router.get("/courses/{course_id}/offerings", response_model=list[OfferingItem])

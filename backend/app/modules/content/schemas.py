@@ -21,6 +21,7 @@ from app.core.enums import (
     UploadSessionStatus,
 )
 from app.core.pagination import CursorPage
+from app.modules.interaction.schemas import RatingSummary
 
 
 # --- 请求 ---
@@ -160,6 +161,11 @@ class ResourceDetailOut(BaseModel):
     updated_at: datetime
     published_version: VersionOut | None
     preview_available: bool
+    # 计数展示（beta14）：下载取 consumed 状态的 download_grants；收藏取 favorites 行数；
+    # 评分复用 interaction 的聚合逻辑（§20.1），不在本模块重复实现。
+    download_count: int = 0
+    favorite_count: int = 0
+    rating_summary: RatingSummary | None = None
 
 
 class PublicationOut(BaseModel):

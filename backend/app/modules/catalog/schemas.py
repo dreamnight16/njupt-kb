@@ -83,6 +83,9 @@ class CourseDetail(BaseModel):
     college_name: str | None = None
     aliases: list[str] = []
     curricula: list[CurriculumLink] = []
+    # 分类资源计数：key 为 resource_type，只统计已发布且对当前查看者可见的资源；
+    # 默认空字典保持既有调用方（未传查看者时）兼容。
+    resource_counts: dict[str, int] = {}
 
 
 class TeacherBrief(BaseModel):

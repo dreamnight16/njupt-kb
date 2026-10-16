@@ -104,6 +104,7 @@ export function ResourceComments({ resourceId }: { resourceId: string }) {
       toast.success('举报已提交，我们会尽快处理');
       setReportTarget(null);
       setReportReason('');
+      queryClient.invalidateQueries({ queryKey: ['my-reports'] });
     },
     onError: (error) => {
       toast.error(describeError(error).message);
@@ -120,6 +121,7 @@ export function ResourceComments({ resourceId }: { resourceId: string }) {
       toast.success('申诉已提交，等待处理');
       setAppealTarget(null);
       setAppealReason('');
+      queryClient.invalidateQueries({ queryKey: ['my-comment-appeals'] });
       queryClient.invalidateQueries({ queryKey: ['comments', resourceId] });
     },
     onError: (error) => {

@@ -9,13 +9,14 @@ from __future__ import annotations
 import hashlib
 import re
 import uuid
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from typing import Any, Literal
 
 from sqlalchemy import (
     DateTime,
     String,
     Text,
+    and_,
     bindparam,
     column,
     delete,
@@ -33,7 +34,6 @@ from app.core.enums import (
     ContributionKind,
     CorrectionStatus,
     DomainEventType,
-    NotificationType,
     RequestStatus,
     ResourceType,
 )
@@ -77,6 +77,10 @@ RATING_CONFIDENCE_C = 5.0
 
 _WHITESPACE = re.compile(r"\s+")
 _LIKE_ESCAPE = "\\"
+
+# 资料需求榜（sort=hot）只统计近 7 天创建的开放需求：超过窗口的需求自然沉底，
+# 避免“关注数最高的老需求”长期占据榜单（beta14 排序与推荐信号）。
+REQUEST_HOT_WINDOW_DAYS = 7
 
 
 def _now() -> datetime:
@@ -822,15 +826,12 @@ async def update_correction_status(
     rewardable = (CorrectionStatus.ACCEPTED, CorrectionStatus.FIXED)
     if status in rewardable and previous not in rewardable:
         await _reward_correction(db, correction)
-    if status != previous and status != CorrectionStatus.OPEN:
-        await _notify_correction_result(db, correction, status)
-
     await emit_event(
         db,
         event_type=DomainEventType.CORRECTION_RESOLVED,
         subject_type="correction",
         subject_id=correction.id,
-        payload={"status": status.value, "submitter_id": str(correction.submitter_id)},
+        payload={"status": status.value, "submitter_id": str(correction.submitter_id), "handled_by": str(actor_id)},
         dedupe_key=f"correction.resolved:{correction.id}:{status.value}",
     )
     await db.flush()
@@ -872,21 +873,6 @@ async def _reward_correction(db: AsyncSession, correction: Correction) -> None:
         reference_type="correction",
         reference_id=correction.id,
         note="纠错被采纳",
-    )
-
-
-async def _notify_correction_result(
-    db: AsyncSession, correction: Correction, status: CorrectionStatus
-) -> None:
-    from app.modules.notification.service import notify
-
-    await notify(
-        db,
-        user_id=correction.submitter_id,
-        type=NotificationType.CORRECTION_RESULT,
-        title="你的纠错有了处理结果",
-        body=f"纠错工单状态已更新为：{status.value}",
-        data={"correction_id": str(correction.id), "status": status.value},
     )
 
 
@@ -1017,7 +1003,15 @@ async def list_requests(
     cursor: str | None,
     limit: int | None,
     viewer=None,
+    sort: str = "latest",
 ) -> CursorPage[RequestItem]:
+    """需求列表。``sort=latest`` 按创建时间倒序（默认，行为不变）；
+
+    ``sort=hot`` 为资料需求榜：近 7 天创建的开放需求，按关注人数降序 + id 降序，
+    游标键与 latest 不同（follower_count/id），两种排序的游标不可混用。
+    """
+    if sort not in ("latest", "hot"):
+        raise InvalidInput("不支持的排序方式", details={"allowed": ["latest", "hot"]})
     page_size = normalize_page_size(limit)
     follower_count = (
         select(func.count(ResourceRequestFollow.id))
@@ -1032,18 +1026,37 @@ async def list_requests(
             stmt = stmt.where(ResourceRequest.status == RequestStatus(status).value)
         except ValueError as exc:
             raise InvalidInput("需求状态无效", details={"status": status}) from exc
-    decoded = _decode_time_cursor(cursor)
-    if decoded is not None:
-        created_at, last_id = decoded
+    if sort == "hot":
+        # 热点窗口与「开放」约束先于游标过滤，保证翻页边界稳定。
+        cutoff = _now() - timedelta(days=REQUEST_HOT_WINDOW_DAYS)
         stmt = stmt.where(
-            or_(
-                ResourceRequest.created_at < created_at,
-                (ResourceRequest.created_at == created_at) & (ResourceRequest.id < last_id),
-            )
+            ResourceRequest.created_at >= cutoff,
+            ResourceRequest.status == RequestStatus.OPEN.value,
         )
-    stmt = stmt.order_by(
-        ResourceRequest.created_at.desc(), ResourceRequest.id.desc()
-    ).limit(page_size + 1)
+        decoded = _decode_hot_cursor(cursor)
+        if decoded is not None:
+            last_followers, last_id = decoded
+            stmt = stmt.where(
+                or_(
+                    follower_count < last_followers,
+                    and_(follower_count == last_followers, ResourceRequest.id < last_id),
+                )
+            )
+        stmt = stmt.order_by(follower_count.desc(), ResourceRequest.id.desc())
+    else:
+        decoded = _decode_time_cursor(cursor)
+        if decoded is not None:
+            created_at, last_id = decoded
+            stmt = stmt.where(
+                or_(
+                    ResourceRequest.created_at < created_at,
+                    (ResourceRequest.created_at == created_at) & (ResourceRequest.id < last_id),
+                )
+            )
+        stmt = stmt.order_by(
+            ResourceRequest.created_at.desc(), ResourceRequest.id.desc()
+        )
+    stmt = stmt.limit(page_size + 1)
     rows = list((await db.execute(stmt)).all())
     has_more = len(rows) > page_size
     rows = rows[:page_size]
@@ -1056,11 +1069,20 @@ async def list_requests(
         await _request_item(db, request, follower_count=int(count or 0), resolution=summaries.get((request.resolved_resource_id, request.course_id), (None, None)))
         for request, count in rows
     ]
-    next_cursor = (
-        encode_cursor({"t": rows[-1][0].created_at.isoformat(), "i": str(rows[-1][0].id)})
-        if has_more and rows
-        else None
-    )
+    if sort == "hot":
+        # 热门游标只带 follower_count 与 id：latest 游标缺 f 键、热门游标缺 t 键，
+        # 任一方误用都会在解码处报「cursor 无效」，不会静默串页。
+        next_cursor = (
+            encode_cursor({"f": int(rows[-1][1] or 0), "i": str(rows[-1][0].id)})
+            if has_more and rows
+            else None
+        )
+    else:
+        next_cursor = (
+            encode_cursor({"t": rows[-1][0].created_at.isoformat(), "i": str(rows[-1][0].id)})
+            if has_more and rows
+            else None
+        )
     return CursorPage(items=items, next_cursor=next_cursor, has_more=has_more)
 
 
@@ -1362,6 +1384,19 @@ def _decode_time_cursor(cursor: str | None) -> tuple[datetime, uuid.UUID] | None
     if created_at.tzinfo is None:
         created_at = created_at.replace(tzinfo=timezone.utc)
     return created_at, last_id
+
+
+def _decode_hot_cursor(cursor: str | None) -> tuple[int, uuid.UUID] | None:
+    """资料需求榜游标：follower_count + id，与 latest 的 created_at + id 键不同，不可混用。"""
+    if not cursor:
+        return None
+    payload = decode_cursor(cursor)
+    try:
+        followers = int(payload["f"])
+        last_id = uuid.UUID(str(payload["i"]))
+    except (KeyError, ValueError, TypeError) as exc:
+        raise InvalidInput("cursor 无效", details={"reason": "malformed"}) from exc
+    return followers, last_id
 
 
 def _decode_search_cursor(cursor: str) -> tuple[int, uuid.UUID, uuid.UUID]:

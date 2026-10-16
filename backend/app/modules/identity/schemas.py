@@ -41,6 +41,11 @@ class LoginRequest(BaseModel):
     password: str
 
 
+class PasswordChangeRequest(BaseModel):
+    current_password: str = Field(min_length=1, max_length=300)
+    new_password: str = Field(min_length=1, max_length=300)
+
+
 class PasswordResetRequest(BaseModel):
     email: EmailStr
 

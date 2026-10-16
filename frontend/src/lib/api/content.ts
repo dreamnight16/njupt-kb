@@ -235,7 +235,8 @@ export interface ResourceListParams {
   year?: number;
   resource_type?: ResourceType;
   keyword?: string;
-  sort?: 'latest' | 'popular';
+  /** latest=最新（默认）/ oldest=最早 / hot=按互动量随时间衰减的热门分。 */
+  sort?: 'latest' | 'popular' | 'oldest' | 'hot';
   limit?: number;
   cursor?: string | null;
 }
