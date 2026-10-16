@@ -1,346 +1,203 @@
-'use client';
-
-import { useState } from 'react';
-import { useQuery } from '@tanstack/react-query';
+import type { Metadata } from 'next';
 import Link from 'next/link';
-import { useSearchParams, useRouter } from 'next/navigation';
-import {
-  Search,
-  Download,
-  Eye,
-  Heart,
-  Star,
-  Upload,
-  SlidersHorizontal,
-  ChevronRight,
-  X,
-} from 'lucide-react';
-import api from '@/lib/api';
-import { formatDate, formatRelative, formatFileSize, formatCount, getResourceTypeInfo } from '@/lib/utils';
-import { Card } from '@/components/ui/Card';
-import { Badge } from '@/components/ui/Badge';
-import { Button } from '@/components/ui/Button';
-import { Input } from '@/components/ui/Input';
-import { SkeletonCard, Skeleton } from '@/components/ui/Skeleton';
-import { EmptyState } from '@/components/ui/EmptyState';
-import { StarRating } from '@/components/ui/StarRating';
-import { ResourceTypeIcon } from '@/components/ui/ResourceTypeIcon';
 
-const RESOURCE_TYPE_OPTIONS = [
-  { value: '', label: '全部' },
-  { value: 'exam', label: '试卷' },
-  { value: 'ppt', label: 'PPT课件' },
-  { value: 'note', label: '笔记' },
-  { value: 'review', label: '复习资料' },
-  { value: 'lab_report', label: '实验报告' },
-  { value: 'textbook', label: '教材' },
-  { value: 'code', label: '代码' },
-  { value: 'other', label: '其他' },
-];
+import { Notice } from '@/components/common/Notice';
+import type { ResourceListItem, ResourceListOut } from '@/lib/api/content';
+import { serverFetch } from '@/lib/api/server';
+import { isResourceType, RESOURCE_TYPE_LABELS, RESOURCE_TYPE_ORDER } from '@/lib/api/types';
+import { firstSearchParam, formatRelative } from '@/lib/utils';
 
-const SORT_OPTIONS = [
-  { value: 'newest', label: '最新上传' },
-  { value: 'downloads', label: '最多下载' },
-  { value: 'rating', label: '最高评分' },
-  { value: 'likes', label: '最多喜欢' },
-];
+export const metadata: Metadata = {
+  title: '资料',
+  description: '按最新或热门浏览南邮课程知识平台的公开资料。',
+  alternates: { canonical: '/resources' },
+};
 
-export default function ResourcesPage() {
-  const searchParams = useSearchParams();
-  const router = useRouter();
-  const [search, setSearch] = useState(searchParams.get('q') || '');
-  const [selectedCollege, setSelectedCollege] = useState<number | null>(null);
-  const [selectedMajor, setSelectedMajor] = useState<number | null>(null);
-  const [selectedCourse, setSelectedCourse] = useState<number | null>(null);
-  const [resourceType, setResourceType] = useState(searchParams.get('type') || '');
-  const [sort, setSort] = useState('newest');
-  const [page, setPage] = useState(1);
+export const dynamic = 'force-dynamic';
 
-  // Colleges
-  const { data: colleges } = useQuery({
-    queryKey: ['colleges'],
-    queryFn: () => api.get('/colleges').then((r) => r.data),
-  });
+type ResourceSort = 'latest' | 'oldest' | 'hot';
 
-  // Majors for selected college
-  const { data: majors } = useQuery({
-    queryKey: ['majors', selectedCollege],
-    queryFn: () => api.get(`/majors?college_id=${selectedCollege}`).then((r) => r.data),
-    enabled: !!selectedCollege,
-  });
+const SORT_LABELS: Record<ResourceSort, string> = {
+  latest: '最新',
+  oldest: '最早',
+  hot: '热门',
+};
 
-  // Courses for selected major
-  const { data: courses } = useQuery({
-    queryKey: ['courses', selectedMajor],
-    queryFn: () => api.get(`/courses?major_id=${selectedMajor}`).then((r) => r.data),
-    enabled: !!selectedMajor,
-  });
+const SORT_HINTS: Record<ResourceSort, string> = {
+  latest: '按更新时间从新到旧。',
+  oldest: '按更新时间从旧到新。',
+  hot: '按互动量（收藏与下载）随时间衰减的热门分；越新的内容热度衰减越慢。',
+};
 
-  // Resources
-  const { data: resourcesData, isLoading: resourcesLoading } = useQuery({
-    queryKey: ['resources', selectedCourse, resourceType, sort, page, search],
-    queryFn: () => {
-      const params = new URLSearchParams();
-      if (selectedCourse) params.set('course_id', String(selectedCourse));
-      if (resourceType) params.set('resource_type', resourceType);
-      params.set('sort', sort);
-      params.set('page', String(page));
-      params.set('page_size', '20');
-      if (search) params.set('q', search);
-      return api.get(`/resources?${params.toString()}`).then((r) => r.data);
-    },
-  });
+type ResourcesSearchParams = Partial<Record<'sort' | 'course_id' | 'keyword' | 'resource_type' | 'cursor', string | string[]>>;
 
-  const collegeList = Array.isArray(colleges) ? colleges : [];
-  const majorList = Array.isArray(majors) ? majors : [];
-  const courseList = Array.isArray(courses) ? courses : [];
-  const resources = Array.isArray(resourcesData?.items) ? resourcesData.items : Array.isArray(resourcesData) ? resourcesData : [];
-  const totalPages = resourcesData?.total_pages || 1;
+function buildQuery(params: Record<string, string | undefined>): string {
+  const search = new URLSearchParams();
+  for (const [key, value] of Object.entries(params)) {
+    if (value) search.set(key, value);
+  }
+  const query = search.toString();
+  return query ? `?${query}` : '';
+}
 
-  const selectedCollegeName = collegeList.find((c: Record<string, unknown>) => c.id === selectedCollege)?.name as string;
-  const selectedMajorName = majorList.find((m: Record<string, unknown>) => m.id === selectedMajor)?.name as string;
-  const selectedCourseName = courseList.find((c: Record<string, unknown>) => c.id === selectedCourse)?.name as string;
+function normalizeSort(value: string | undefined): ResourceSort {
+  // 非法排序值回退默认，与后端 400 契约区分：URL 手输不等于接口调用。
+  return value === 'hot' || value === 'oldest' ? value : 'latest';
+}
 
-  const breadcrumbs = [
-    { label: '资源中心', href: '/resources' },
-    selectedCollegeName && { label: selectedCollegeName, href: '#' },
-    selectedMajorName && { label: selectedMajorName, href: '#' },
-    selectedCourseName && { label: selectedCourseName, href: '#' },
-  ].filter(Boolean) as { label: string; href: string }[];
-
-  const handleSearch = () => {
-    setPage(1);
-    // triggers refetch via queryKey
+export default async function ResourcesPage({
+  searchParams,
+}: {
+  searchParams: Promise<ResourcesSearchParams>;
+}) {
+  const params = Object.fromEntries(Object.entries(await searchParams).map(([key, value]) => [key, firstSearchParam(value)]));
+  const sort = normalizeSort(params.sort);
+  const keyword = params.keyword?.trim() || '';
+  const cursor = params.cursor || '';
+  const resourceType = params.resource_type && isResourceType(params.resource_type) ? params.resource_type : '';
+  const filters = {
+    course_id: params.course_id || undefined,
+    keyword: keyword || undefined,
+    resource_type: resourceType || undefined,
   };
+
+  const query = buildQuery({
+    ...filters,
+    sort: sort === 'latest' ? undefined : sort,
+    course_id: params.course_id || undefined,
+    keyword: keyword || undefined,
+    cursor: cursor || undefined,
+    limit: '20',
+  });
+  const listResult = await serverFetch<ResourceListOut>(`/resources${query}`);
+  const items: ResourceListItem[] = listResult.data?.items ?? [];
+  const nextCursor = listResult.data?.next_cursor ?? null;
+
+  // 分段排序控件为原生链接：不依赖 JS 即可切换，键盘可达（§39 A20）。
+  const sortLinks = (Object.keys(SORT_LABELS) as ResourceSort[]).map((value) => ({
+    value,
+    href: `/resources${buildQuery({
+      ...filters,
+      sort: value === 'latest' ? undefined : value,
+      course_id: params.course_id || undefined,
+      keyword: keyword || undefined,
+    })}`,
+  }));
 
   return (
     <div className="space-y-6">
-      {/* Search & Filter Bar */}
-      <div className="flex items-center gap-3">
-        <div className="flex-1 max-w-md">
-          <div className="relative">
-            <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
-            <input
-              type="text"
-              placeholder="搜索资料..."
-              value={search}
-              onChange={(e) => setSearch(e.target.value)}
-              onKeyDown={(e) => e.key === 'Enter' && handleSearch()}
-              className="w-full pl-10 pr-4 py-2 text-sm border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 outline-none"
-            />
-          </div>
-        </div>
-        <Link href="/upload">
-          <Button variant="primary" size="sm">
-            <Upload className="w-4 h-4 mr-1.5" /> 上传
-          </Button>
-        </Link>
-      </div>
+      <header className="bg-ink px-6 py-8 text-on-ink">
+        <p className="dn-kicker">RESOURCES</p>
+        <h1 className="dn-display mt-2 text-3xl">资料</h1>
+        <p className="mt-2 max-w-2xl text-on-ink">
+          仅展示已发布且当前版本已通过审核的资料。
+        </p>
+      </header>
 
-      {/* Breadcrumb */}
-      {breadcrumbs.length > 1 && (
-        <div className="flex items-center gap-1 text-sm text-gray-500">
-          {breadcrumbs.map((crumb, i) => (
-            <span key={i} className="flex items-center gap-1">
-              {i > 0 && <ChevronRight className="w-3 h-3" />}
-              {i === breadcrumbs.length - 1 ? (
-                <span className="text-gray-900 font-medium">{crumb.label}</span>
-              ) : (
-                <Link href={crumb.href} className="hover:text-indigo-600">
-                  {crumb.label}
-                </Link>
-              )}
-            </span>
-          ))}
+      <form action="/resources" className="grid gap-3 border border-divider bg-surface p-4 sm:grid-cols-[1fr_auto_auto]">
+        <input type="hidden" name="sort" value={sort} />
+        {params.course_id && <input type="hidden" name="course_id" value={params.course_id} />}
+        <label className="text-sm font-medium">
+          关键词
+          <input type="search" name="keyword" defaultValue={keyword} className="mt-1 min-h-11 w-full border border-control-border bg-surface px-3" />
+        </label>
+        <label className="text-sm font-medium">
+          资料类型
+          <select name="resource_type" defaultValue={resourceType} className="mt-1 min-h-11 w-full border border-control-border bg-surface px-3">
+            <option value="">全部类型</option>
+            {RESOURCE_TYPE_ORDER.map((value) => <option key={value} value={value}>{RESOURCE_TYPE_LABELS[value]}</option>)}
+          </select>
+        </label>
+        <div className="flex items-end gap-3">
+          <button type="submit" className="min-h-11 bg-brand px-4 text-sm font-medium text-on-color">筛选</button>
+          {(keyword || resourceType || params.course_id) && <Link href="/resources" className="min-h-11 content-center text-sm underline">清除</Link>}
         </div>
-      )}
+      </form>
 
-      {/* Type Tabs & Sort */}
       <div className="flex flex-wrap items-center justify-between gap-3">
-        <div className="flex flex-wrap gap-1.5">
-          {RESOURCE_TYPE_OPTIONS.map((opt) => (
-            <button
-              key={opt.value}
-              onClick={() => { setResourceType(opt.value); setPage(1); }}
-              className={`px-3 py-1.5 text-xs font-medium rounded-full transition-colors ${
-                resourceType === opt.value
-                  ? 'bg-indigo-600 text-white'
-                  : 'bg-gray-100 text-gray-600 hover:bg-gray-200'
+        <div className="flex flex-wrap items-center gap-2" role="group" aria-label="排序方式">
+          {sortLinks.map((link) => (
+            <Link
+              key={link.value}
+              href={link.href}
+              aria-current={sort === link.value ? 'true' : undefined}
+              className={`inline-flex min-h-11 items-center px-3 text-sm font-medium ${
+                sort === link.value
+                  ? 'bg-brand text-on-color'
+                  : 'border border-control-border text-text-primary hover:bg-canvas'
               }`}
             >
-              {opt.label}
-            </button>
+              {SORT_LABELS[link.value]}
+            </Link>
           ))}
         </div>
-        <select
-          value={sort}
-          onChange={(e) => { setSort(e.target.value); setPage(1); }}
-          className="text-sm border border-gray-300 rounded-lg px-3 py-1.5 bg-white"
+        <p className="text-xs text-text-secondary">{SORT_HINTS[sort]}</p>
+      </div>
+
+      {listResult.error ? (
+        <Notice
+          tone="warning"
+          title="资料列表暂时无法加载"
+          action={
+            <Link
+              href={`/resources${buildQuery({
+                ...filters,
+                sort: sort === 'latest' ? undefined : sort,
+                course_id: params.course_id || undefined,
+                keyword: keyword || undefined,
+              })}`}
+              className="inline-flex min-h-11 items-center border border-control-border px-3 text-sm text-text-primary hover:bg-canvas"
+            >
+              重试
+            </Link>
+          }
         >
-          {SORT_OPTIONS.map((opt) => (
-            <option key={opt.value} value={opt.value}>{opt.label}</option>
-          ))}
-        </select>
-      </div>
-
-      <div className="flex flex-col lg:flex-row gap-6">
-        {/* Left: College/Major/Course sidebar */}
-        <div className="lg:w-56 flex-shrink-0">
-          <Card padding="sm">
-            <h3 className="text-sm font-semibold text-gray-900 mb-3 px-1">学院列表</h3>
-            <div className="space-y-0.5 max-h-96 overflow-y-auto">
-              <button
-                onClick={() => {
-                  setSelectedCollege(null);
-                  setSelectedMajor(null);
-                  setSelectedCourse(null);
-                  setPage(1);
-                }}
-                className={`w-full text-left px-2 py-1.5 text-sm rounded-md transition-colors ${
-                  !selectedCollege ? 'bg-indigo-50 text-indigo-700 font-medium' : 'text-gray-600 hover:bg-gray-50'
-                }`}
-              >
-                全部学院
-              </button>
-              {collegeList.map((college: Record<string, unknown>) => (
-                <div key={college.id as number}>
-                  <button
-                    onClick={() => {
-                      setSelectedCollege(college.id as number);
-                      setSelectedMajor(null);
-                      setSelectedCourse(null);
-                      setPage(1);
-                    }}
-                    className={`w-full text-left px-2 py-1.5 text-sm rounded-md transition-colors ${
-                      selectedCollege === college.id ? 'bg-indigo-50 text-indigo-700 font-medium' : 'text-gray-600 hover:bg-gray-50'
-                    }`}
-                  >
-                    {college.name as string}
-                  </button>
-                  {selectedCollege === college.id && majorList.length > 0 && (
-                    <div className="ml-4 mt-0.5 space-y-0.5">
-                      {majorList.map((major: Record<string, unknown>) => (
-                        <div key={major.id as number}>
-                          <button
-                            onClick={() => {
-                              setSelectedMajor(major.id as number);
-                              setSelectedCourse(null);
-                              setPage(1);
-                            }}
-                            className={`w-full text-left px-2 py-1.5 text-xs rounded-md transition-colors ${
-                              selectedMajor === major.id ? 'bg-indigo-50 text-indigo-700 font-medium' : 'text-gray-500 hover:bg-gray-50'
-                            }`}
-                          >
-                            {major.name as string}
-                          </button>
-                          {selectedMajor === major.id && courseList.length > 0 && (
-                            <div className="ml-3 mt-0.5 space-y-0.5">
-                              {courseList.map((course: Record<string, unknown>) => (
-                                <button
-                                  key={course.id as number}
-                                  onClick={() => {
-                                    setSelectedCourse(course.id as number);
-                                    setPage(1);
-                                  }}
-                                  className={`w-full text-left px-2 py-1 text-xs rounded-md transition-colors ${
-                                    selectedCourse === course.id ? 'bg-indigo-50 text-indigo-700 font-medium' : 'text-gray-400 hover:bg-gray-50'
-                                  }`}
-                                >
-                                  {course.name as string}
-                                </button>
-                              ))}
-                            </div>
-                          )}
-                        </div>
-                      ))}
-                    </div>
-                  )}
-                </div>
-              ))}
-            </div>
-          </Card>
-        </div>
-
-        {/* Right: Resource List */}
-        <div className="flex-1">
-          {resourcesLoading ? (
-            <div className="space-y-4">
-              {Array.from({ length: 5 }).map((_, i) => <SkeletonCard key={i} />)}
-            </div>
-          ) : resources.length === 0 ? (
-            <EmptyState
-              title="暂无资料"
-              description="该分类下还没有资料，来上传第一个吧！"
-              actionLabel="上传资料"
-              onAction={() => router.push('/upload')}
-            />
-          ) : (
-            <>
-              <div className="space-y-4">
-                {resources.map((item: Record<string, unknown>, i: number) => {
-                  const typeInfo = getResourceTypeInfo(item.resource_type as string);
-                  return (
+          {listResult.error.message}
+        </Notice>
+      ) : items.length > 0 ? (
+        <>
+          <ul className="space-y-3">
+            {items.map((item) => (
+              <li key={item.id} className="border border-divider bg-surface p-4">
+                <div className="flex flex-wrap items-start justify-between gap-3">
+                  <div className="min-w-0">
                     <Link
-                      key={i}
                       href={`/resources/${item.id}`}
-                      className="block bg-white rounded-xl border border-gray-200 p-5 hover:shadow-md hover:border-gray-300 transition-all"
+                      className="break-words text-sm font-medium text-text-primary underline underline-offset-2 hover:text-brand"
                     >
-                      <div className="flex items-start gap-4">
-                        <ResourceTypeIcon type={(item.resource_type as string) || 'other'} size="md" />
-                        <div className="flex-1 min-w-0">
-                          <h3 className="text-sm font-semibold text-gray-900 line-clamp-1">
-                            {item.title as string}
-                          </h3>
-                          <p className="text-xs text-gray-500 mt-1 line-clamp-2">
-                            {item.description as string || '暂无描述'}
-                          </p>
-                          <div className="flex flex-wrap items-center gap-3 mt-3 text-xs text-gray-400">
-                            <span className="flex items-center gap-0.5">
-                              <Download className="w-3 h-3" /> {formatCount((item.download_count as number) || 0)}
-                            </span>
-                            <span className="flex items-center gap-0.5">
-                              <Eye className="w-3 h-3" /> {formatCount((item.view_count as number) || 0)}
-                            </span>
-                            <span className="flex items-center gap-0.5">
-                              <Heart className="w-3 h-3" /> {formatCount((item.like_count as number) || 0)}
-                            </span>
-                            <StarRating rating={(item.avg_rating as number) || 0} size="sm" showValue />
-                            <Badge color="gray">{typeInfo.label}</Badge>
-                            <span>{formatRelative(item.created_at as string)}</span>
-                          </div>
-                        </div>
-                      </div>
+                      {item.title ?? '未命名资料'}
                     </Link>
-                  );
-                })}
-              </div>
-
-              {/* Pagination */}
-              {totalPages > 1 && (
-                <div className="flex items-center justify-center gap-2 mt-6">
-                  <button
-                    onClick={() => setPage(Math.max(1, page - 1))}
-                    disabled={page === 1}
-                    className="px-3 py-1.5 text-sm border border-gray-300 rounded-lg disabled:opacity-50"
-                  >
-                    上一页
-                  </button>
-                  <span className="text-sm text-gray-600">
-                    {page} / {totalPages}
-                  </span>
-                  <button
-                    onClick={() => setPage(Math.min(totalPages, page + 1))}
-                    disabled={page === totalPages}
-                    className="px-3 py-1.5 text-sm border border-gray-300 rounded-lg disabled:opacity-50"
-                  >
-                    下一页
-                  </button>
+                    <p className="mt-1 text-xs text-text-secondary">
+                      {RESOURCE_TYPE_LABELS[item.resource_type] ?? item.resource_type}
+                      {' · '}
+                      {formatRelative(item.updated_at)}
+                    </p>
+                  </div>
                 </div>
-              )}
-            </>
+              </li>
+            ))}
+          </ul>
+          {nextCursor && (
+            <Link
+              href={`/resources${buildQuery({
+                ...filters,
+                sort: sort === 'latest' ? undefined : sort,
+                course_id: params.course_id || undefined,
+                keyword: keyword || undefined,
+                cursor: nextCursor,
+              })}`}
+              className="inline-flex min-h-11 items-center border border-control-border px-4 text-sm font-medium text-text-primary hover:bg-canvas"
+            >
+              下一页
+            </Link>
           )}
-        </div>
-      </div>
+        </>
+      ) : (
+        <Notice title="暂无资料">
+          当前筛选条件下没有已发布的资料，可换个关键词或排序方式。
+          <Link href={`/requests${buildQuery({ new: '1', keyword: keyword || undefined, course_id: params.course_id })}`} className="mt-2 flex min-h-11 items-center text-brand underline">发起资料需求</Link>
+        </Notice>
+      )}
     </div>
   );
 }
