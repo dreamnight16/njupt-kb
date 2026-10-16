@@ -125,4 +125,55 @@ class CSRFMiddleware(BaseHTTPMiddleware):
         return JSONResponse(status_code=403, content=error_body(code, message, request_id, None))
 
 
-__all__ = ["RequestContextMiddleware", "CSRFMiddleware", "actor_id_var"]
+class SecurityHeadersMiddleware(BaseHTTPMiddleware):
+    """为每个 API 响应注入严格安全响应头，并在生产环境强制 HTTPS 传输（补充规范 §27/§28）。
+
+    前端页面由 Next.js 自身通过 next.config 的 headers() 配置更宽松、适合 HTML/JS 的 CSP；
+    此处 API 仅返回 JSON，故采用 ``default-src 'none'`` 的最严格策略。
+    """
+
+    @staticmethod
+    def _is_secure(request: Request) -> bool:
+        # 反向代理终止 TLS 后，原始协议通过 X-Forwarded-Proto 透传。
+        return request.url.scheme == "https" or request.headers.get("X-Forwarded-Proto", "").lower() == "https"
+
+    @staticmethod
+    def _apply(response: Response) -> None:
+        headers = response.headers
+        headers.setdefault("X-Content-Type-Options", "nosniff")
+        headers.setdefault("X-Frame-Options", "DENY")
+        headers.setdefault("Referrer-Policy", "no-referrer")
+        headers.setdefault("Permissions-Policy", "geolocation=(), camera=(), microphone=(), payment=()")
+        # API 仅返回 JSON，无内联脚本/帧需求；前端页面应使用更适合 HTML 的宽松 CSP。
+        headers.setdefault(
+            "Content-Security-Policy",
+            "default-src 'none'; frame-ancestors 'none'; base-uri 'none'",
+        )
+        headers.setdefault("X-XSS-Protection", "0")  # 已弃用，依赖 CSP 兜底
+        # 敏感 JSON 避免落盘缓存；若响应已声明缓存策略则尊重原值。
+        if not headers.get("Cache-Control"):
+            headers["Cache-Control"] = "no-store"
+        # HSTS 仅在 prod（cookie_secure 为真）下发，避免非 HTTPS 部署被锁死。
+        if settings.cookie_secure:
+            headers.setdefault(
+                "Strict-Transport-Security", "max-age=31536000; includeSubDomains"
+            )
+
+    async def dispatch(
+        self, request: Request, call_next: Callable[[Request], Awaitable[Response]]
+    ) -> Response:
+        # 生产环境强制 HTTPS（应对反向代理后的 TLS 终止）。非 prod 跳过，便于本地 http 调试。
+        if settings.is_prod and not self._is_secure(request):
+            request_id = getattr(request.state, "request_id", "req_unknown")
+            response: Response = JSONResponse(
+                status_code=403,
+                content=error_body("INSECURE_TRANSPORT", "仅允许通过 HTTPS 访问", request_id, None),
+            )
+            self._apply(response)
+            return response
+        response = await call_next(request)
+        self._apply(response)
+        return response
+
+
+__all__ = ["RequestContextMiddleware", "CSRFMiddleware", "SecurityHeadersMiddleware", "actor_id_var"]

@@ -17,7 +17,7 @@ from app.config import settings
 from app import __version__
 from app.core.errors import install_error_handlers
 from app.core.logging import configure_logging
-from app.core.middleware import CSRFMiddleware, RequestContextMiddleware
+from app.core.middleware import CSRFMiddleware, RequestContextMiddleware, SecurityHeadersMiddleware
 from app.core.ratelimit import redis_healthy
 from app.core.storage import storage
 from app.db import engine
@@ -51,6 +51,10 @@ app = FastAPI(
     openapi_url=f"{settings.API_PREFIX}/openapi.json" if settings.ENV != "prod" else None,
     lifespan=lifespan,
 )
+
+# 顺序：安全响应头/传输安全注册在最外层，先于 CORS 与路由生效，
+# 使其作用于全部响应（含 CORS 预检），并在反向代理 TLS 终止场景下优先拦截明文请求。
+app.add_middleware(SecurityHeadersMiddleware)
 
 # 顺序：来源校验依赖 CORS 头，故 CORS 在 CSRF 之外。
 app.add_middleware(RequestContextMiddleware)

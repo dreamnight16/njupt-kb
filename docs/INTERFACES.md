@@ -1,5 +1,19 @@
 # 跨模块接口声明
 
+## beta13 增补
+
+- `moderation.comment_reports.create_comment_report` / `create_comment_appeal`：按 `reporter_id`/`appellant_id` 做提交频控（`check_rate_limit`，`COMMENT_REPORT_RATE_LIMIT`/`COMMENT_APPEAL_RATE_LIMIT`，窗口 `*_RATE_WINDOW_SECONDS`）与"本人未处理数"上限（`COMMENT_REPORT_OPEN_CAP`/`COMMENT_APPEAL_OPEN_CAP`）；超限返回 `429 RATE_LIMITED`（未处理上限用 code `REPORT_OPEN_CAP_EXCEEDED`/`APPEAL_OPEN_CAP_EXCEEDED`）。检查在既有唯一索引判定之前，不改变受理/驳回/处置权限与审计。
+- `ops.service.check_ops_alerts(db)` 与 `GET /admin/alerts`（权限 `ops.view`）：只读聚合未处理举报、待审版本、未处理纠错、开放需求、失败事件与失败任务，各一次 COUNT；按 `OPS_ALERT_*` 阈值生成 `level=warning|critical`（critical 倍率 `OPS_ALERT_CRITICAL_MULTIPLIER`），非 critical 优先、按计数降序；返回 `OpsAlertsOut{alerts, has_critical, generated_at}`。不写库、不自动处置。
+- `access.service.revoke_preview_grant(db, *, actor, grant_id, reason, request_id)` 与 `POST /admin/preview-grants/{grant_id}/revoke`（权限 `RESOURCE_REVIEW`，返回 `PreviewGrantOut`）：撤销单条预览凭证，`reason` 1–255 字，置 `status=revoked`、清 `preview-grant:{id}` 缓存、写审计；已撤销返回 `409 PREVIEW_GRANT_ALREADY_REVOKED`（幂等）。
+- `access.service.revoke_resource_previews(db, *, actor, resource_id, reason, request_id)` 与 `POST /admin/resources/{resource_id}/preview-revoke`（权限 `RESOURCE_REVIEW`，返回 `{resource_id, revoked_count}`）：按资源批量仅撤销活跃态（`issued`/`consumed`），不删凭证记录，清 `preview-resource:{id}` 缓存并写审计；资源不存在经 content 抛 404。
+- `identity.service.run_retention_cleanup(db, *, retention_days=ACCOUNT_RETENTION_DAYS=30, now=None)`：对 `status=deleted`、`deleted_at` 非空、`purged_at` 空且 `deleted_at ≤ now-retention_days` 的账号，置墓碑邮箱 `purged+{id}@purged.invalid`、清 `email_verified_at` 并置 `purged_at`、撤销全部会话、撤销该用户 `EMAIL` 类 `UserIdentity`，逐条写 `identity.account_purged` 审计。**不删用户行、业务记录与审计**，只收敛 PII；返回清理条数。定时入口 `python -m app.modules.identity.retention`。
+- `core.storage.presign_preview_download(storage_key, *, bucket, file_name=None)`：预览专用短期预签名，固定走 `PREVIEW_URL_TTL_SECONDS`（默认 300s），不改变既有 `presign_download` 语义。`access.issue_preview_grant` 据该 TTL 设置 `PreviewGrant.valid_until` 并用它签发。
+- `access.watermark_integrity.compute_watermark_token(*, user_id, resource_id, version_id)` / `verify_watermark_token(...)`：`SECRET_KEY` 的 HMAC-SHA256，把水印令牌绑定到 (用户, 资源, 版本)，`compare_digest` 恒定时间比对、任一入参被篡改即 False；令牌不带权限判断，权限仍由 authorize 负责。`PreviewGrantResult` 新增 `watermark_token`，随 `issue_preview_grant` 返回供渲染侧复核。
+- `core/aigateway.py`（启用前构建块，AI 默认关闭、不接线上供应商）：`CircuitBreaker`（`AI_GATEWAY_FAILURE_THRESHOLD` 连续失败熔断、`AI_GATEWAY_COOLDOWN_SECONDS` 后半开试探、一成一败）、`CallBudget`（每 `request_id` 的 `AI_REQUEST_MAX_CALLS`/`AI_REQUEST_MAX_TOKENS` 预算）、`sanitize_ai_prompt`（剥离控制字符与提示注入越权标记）、`call_ai_safe`（`AI_ENABLED=False` 立即返回 None 空操作；启用时经熔断/预算/`AI_GATEWAY_TIMEOUT_SECONDS` 并优雅降级）。均进程内实现，生产熔断/预算应接 Redis（NOT_RUN）。
+- `core.middleware.SecurityHeadersMiddleware`（注册于最外层）：为 API 响应下发 `X-Content-Type-Options: nosniff`、`X-Frame-Options: DENY`、`Referrer-Policy: no-referrer`、`Permissions-Policy`、CSP `default-src 'none'; frame-ancestors 'none'; base-uri 'none'`、`X-XSS-Protection: 0`、`Cache-Control: no-store`（已有缓存策略不覆盖）；`cookie_secure` 为真加 HSTS。生产（`is_prod`）非 HTTPS（`X-Forwarded-Proto: https` 放行）返回 `403 INSECURE_TRANSPORT`。
+- `errors` 通用 500 处理器：生产返回 `500 INTERNAL_ERROR`（不泄露堆栈/内部路径/配置），dev 返回异常详情；业务错误体形状不变。
+- 依赖基线升级（安全补丁，最小变更）：`fastapi 0.115.6→0.115.12`（查询参数解析 ReDoS，GHSA-2m2c-j64x-2xpp）、`Pillow 11.1.0→11.3.0`（CVE-2025-48379）。迁移仅 `0009_beta13_retention`（`users.purged_at` + 索引）。
+
 ## beta12 增补
 
 - `identity.service.set_account_status(db, *, user_id, status, reason, actor_id, request_id)`：人工暂停/恢复账号的唯一写入口。行锁读取目标；仅有效管理员可操作，不能暂停/恢复自己或其他管理员；`reason` 必填；状态必须按 `active→suspended→active` 流转，非法流向、状态已变化或目标已注销返回 409 `ACCOUNT_STATE_CHANGED`。会话撤销与同事务审计由调用方 `moderation.set_account_restriction` 负责，本函数不重复实现。

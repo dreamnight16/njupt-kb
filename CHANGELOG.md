@@ -1,5 +1,34 @@
 # 变更记录
 
+## 0.0.1-beta.13 — 2026-10-16
+
+把治理队列防滥用、运营告警、预览撤权与注销账号保留期清理收进一轮，并补上讲安全更新：预览短期化与水印防篡改、AI Gateway 熔断/预算构建块、API 安全响应头与生产防泄露、依赖基线升级。
+
+- **治理队列防滥用（buchong.md）**：评论举报与作者申诉新增按用户的提交频控与未处理上限，可调默认值（`COMMENT_REPORT_*`、`COMMENT_APPEAL_*`）。按用户维度计数，未处理数达到上限即拒绝新提交，避免单一账号刷爆治理队列；不改变受理/驳回/处置的既有权限与审计。
+- **运营告警只读聚合**：新增 `GET /admin/alerts`（`ops.view`），复用工作台计数口径聚合未处理举报、待审版本、未处理纠错、开放需求、失败事件与失败任务，按可调阈值（`OPS_ALERT_*`）产生 warning/critical 两级告警，critical 走 `OPS_ALERT_CRITICAL_MULTIPLIER` 倍率。只读聚合、不写库、不自动处置。
+- **预览撤权硬化（§17.1）**：新增 `POST /admin/preview-grants/{grant_id}/revoke`（单条）与 `POST /admin/resources/{resource_id}/preview-revoke`（按资源批量，仅撤活跃态），均需 `RESOURCE_REVIEW` 权限、理由必填 1–255 字、写审计并清预览缓存；已撤销的幂等报 `Conflict`，不删凭证记录。
+- **注销保留期清理**：新增迁移 `0009_beta13_retention`（`users.purged_at` + 索引）；`identity.run_retention_cleanup` 对超过保留期（默认 `ACCOUNT_RETENTION_DAYS=30`）的已注销账号置墓碑邮箱 `purged+{id}@purged.invalid`、清邮箱验证时间、撤销全部会话与 EMAIL 身份，置 `purged_at`；**不删用户行、业务记录与审计**，仅收敛个人可识别信息。提供 `python -m app.modules.identity.retention` 定时清理入口。
+
+安全更新（对应 prevew.md、AI对抗攻击防御设计.md、rongyu.md、代码保护与网络安全补充规范）：
+
+- **预览与传输安全**：预览专用短期预签名 `storage.presign_preview_download`，改用 `PREVIEW_URL_TTL_SECONDS`（默认 300s）替代默认下载有效期，`issue_preview_grant` 据该 TTL 设置 `grant.valid_until`；新增 `access.watermark_integrity`，以 `SECRET_KEY` 的 HMAC-SHA256 把水印令牌绑定到 (用户, 资源, 版本)，预览结果新增 `watermark_token` 字段供渲染侧复核防篡改/冒用。
+- **AI 安全构建块**：AI 默认关闭；启用前提供 P0 边界 `core/aigateway.py`——`CircuitBreaker`（连续失败熔断、冷却后半开试探）、`CallBudget`（每请求调用次数/累计 token 预算，`AI_REQUEST_MAX_*`）、`sanitize_ai_prompt`（剥离控制字符与提示注入越权标记）、`call_ai_safe`（`AI_ENABLED=False` 立即空操作返回 None，启用时受熔断/预算/超时 `AI_GATEWAY_*` 约束并优雅降级）。未接入线上供应商、熔断/预算不做跨进程共享（均为进程内，生产应接 Redis）。
+- **代码与网络安全**：新增 `SecurityHeadersMiddleware`（注册在最外层）为 API 响应下发 `X-Content-Type-Options`、`X-Frame-Options: DENY`、`Referrer-Policy: no-referrer`、`Permissions-Policy`、CSP `default-src 'none'`、`X-XSS-Protection: 0`、`Cache-Control: no-store`，生产（`cookie_secure`）另加 HSTS；生产环境非 HTTPS（含反向代理 `X-Forwarded-Proto`）返回 403。`errors.py` 增加通用 500 处理器：生产只返回通用的 `INTERNAL_ERROR`，不泄露堆栈/路径/配置，dev 保留详情。前端 `next.config` 增 `headers()` 下发非破坏性浏览器安全头（prod HSTS）。
+- **依赖/供应链安全**：`fastapi 0.115.6→0.115.12`（查询参数解析 ReDoS，GHSA-2m2c-j64x-2xpp）、`Pillow 11.1.0→11.3.0`（CVE-2025-48379）。保持最小升级，未动无安全补丁的依赖。
+
+新增 `tests/test_beta13.py`（治理防滥用/运营告警/预览撤权/保留期 11 项）与 `tests/test_security_preview.py`、`tests/test_aigateway.py`、`tests/test_security_headers.py`；前后端及锁文件同步 `0.0.1-beta.13`；`docs/INTERFACES.md` 增加 beta13 增补节。
+
+### 验证与部署边界
+
+- 后端隔离 SQLite 全量 **177 项通过**（原 144 项 + beta13 11 项 + 安全 22 项），覆盖举报/申诉频控与未处理上限、运营告警阈值触发/不触发、预览单条与资源级撤销及幂等、保留期清理保留业务记录、预览 TTL 与水印令牌正确/篡改判定、熔断开—冷却—半开—恢复、调用预算超额、AI 关闭时空操作、提示注入剥离、安全响应头与生产 500 防泄露、prod 明文 403 与 `X-Forwarded-Proto` 放行。
+- 未做前端全量 TypeScript/ESLint/生产构建的本地复跑（`next.config` 的头为增量、非破坏性；建议 CI 复跑 `tsc --noEmit`、lint 与 build）。
+- 迁移 `0009_beta13_retention` 单一 head，仅加一列一索引，回退删列删索引，无既有数据回填风险。
+- **仍为 NOT_RUN/待验收**（本机无 Docker/psql/Redis/MinIO/真实 S3/AI 供应商，不伪造已完成）：真实 PostgreSQL 迁移与并发、Redis 熔断/预算跨进程共享、MinIO/真实签名短链、ClamAV/Celery 联调、AI 供应商接入、反向代理 TLS 强传输与受信代理配置。`aigateway` 为启用前构建块，未接入任何线上 AI。
+
+### 规划对应与边界
+
+对应系统设计 §13/§15/§17/§25/§27，以及 `规划设计/prevew.md`（签名 URL 短期化、水印防篡改）、`规划设计/AI对抗攻击防御设计.md` 与 `规划设计/rongyu.md`（防自动化、提示注入、熔断/预算、AI 是增强非依赖）、`规划设计/代码保护、逆向工程防护与网络安全补充规范.md`（安全响应头、传输安全、接口最小化）、`规划设计/buchong.md`（治理队列防滥用、运营告警）。边界：AI 默认关闭、不擅自接线上供应商；API CSP 为 JSON 最严策略，前端 HTML/JS 的宽松 CSP 另行白名单配置；水印令牌不带权限判断，权限仍由 authorize 负责；保留期只清理个人可识别信息，业务事实与审计一律保留；依赖按最小安全补丁升级，未做无关大版本变动。本轮为本地迭代，未据此宣称已部署或发布。
+
 ## 0.0.1-beta.12 — 2026-10-16
 
 把高频个人数据与治理动作收进工作台，并替上传与预览链路补上解析上限和字节一致性硬约束。

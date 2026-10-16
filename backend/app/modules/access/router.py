@@ -6,6 +6,7 @@
 from __future__ import annotations
 
 from fastapi import APIRouter, Depends, Header, Query, status
+from pydantic import BaseModel, Field
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.deps import (
@@ -16,7 +17,7 @@ from app.core.deps import (
     parse_uuid,
 )
 from app.core.pagination import CursorPage
-from app.core.permissions import CATALOG_MANAGE, ENTITLEMENT_GRANT, require
+from app.core.permissions import CATALOG_MANAGE, ENTITLEMENT_GRANT, RESOURCE_REVIEW, require
 from app.modules.access import service
 from app.modules.access.schemas import (
     AccessPolicyOut,
@@ -26,6 +27,7 @@ from app.modules.access.schemas import (
     EntitlementCreate,
     EntitlementOut,
     EntitlementRevoke,
+    PreviewGrantOut,
     PreviewGrantRequest,
     PreviewGrantResult,
 )
@@ -146,3 +148,37 @@ async def admin_set_access_policy(
         db, actor=actor, resource_id=rid, payload=body, request_id=request_id
     )
     return AccessPolicyOut.model_validate(policy)
+
+
+class _RevokeBody(BaseModel):
+    reason: str = Field(min_length=1, max_length=255)
+
+
+@router.post("/admin/preview-grants/{grant_id}/revoke", response_model=PreviewGrantOut)
+async def admin_revoke_preview_grant(
+    grant_id: str,
+    body: _RevokeBody,
+    actor=Depends(require(RESOURCE_REVIEW)),
+    db: AsyncSession = Depends(get_db),
+    request_id: str = Depends(get_request_id),
+) -> PreviewGrantOut:
+    gid = parse_uuid(grant_id, "grant_id")
+    grant = await service.revoke_preview_grant(
+        db, actor=actor, grant_id=gid, reason=body.reason, request_id=request_id
+    )
+    return PreviewGrantOut.model_validate(grant)
+
+
+@router.post("/admin/resources/{resource_id}/preview-revoke")
+async def admin_revoke_resource_previews(
+    resource_id: str,
+    body: _RevokeBody,
+    actor=Depends(require(RESOURCE_REVIEW)),
+    db: AsyncSession = Depends(get_db),
+    request_id: str = Depends(get_request_id),
+):
+    rid = parse_uuid(resource_id, "resource_id")
+    count = await service.revoke_resource_previews(
+        db, actor=actor, resource_id=rid, reason=body.reason, request_id=request_id
+    )
+    return {"resource_id": str(rid), "revoked_count": count}

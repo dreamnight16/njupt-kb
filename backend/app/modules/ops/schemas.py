@@ -25,3 +25,22 @@ class WorkbenchOut(BaseModel):
     items: list[WorkbenchItem]
     total: int
     generated_at: datetime
+
+
+class OpsAlertOut(BaseModel):
+    """单条运营告警：达到阈值的指标、当前计数与可跳转路径。"""
+
+    key: str
+    label: str
+    count: int
+    href: str
+    level: str  # "warning" | "critical"
+    threshold: int
+
+
+class OpsAlertsOut(BaseModel):
+    """运营告警列表：只读聚合，达到阈值的指标才出现，供管理员优先处置。"""
+
+    alerts: list[OpsAlertOut]
+    has_critical: bool
+    generated_at: datetime

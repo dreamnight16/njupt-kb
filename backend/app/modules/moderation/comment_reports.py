@@ -14,14 +14,16 @@ import uuid
 from datetime import datetime, timezone
 from typing import Sequence
 
-from sqlalchemy import select, update
+from sqlalchemy import func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.config import settings
 from app.core.audit import record_audit
 from app.core.enums import AccountStatus, DomainEventType, ReportStatus
-from app.core.errors import Conflict, Forbidden, InvalidInput, NotFound
+from app.core.errors import Conflict, Forbidden, InvalidInput, NotFound, RateLimited
 from app.core.events import emit_event
 from app.core.pagination import CursorPage
+from app.core.ratelimit import check_rate_limit
 from app.modules.moderation.models import AppealStatus, CommentAppeal, Report
 from app.modules.moderation.schemas import CommentAppealOut, CommentReportOut
 from app.modules.moderation.service import _page
@@ -169,6 +171,15 @@ async def create_comment_report(
     if comment.user_id == reporter.id:
         raise Forbidden("不能举报自己发布的评论")
 
+    # 频控：按用户维度限制举报提交速率，避免单一账号刷爆治理队列（buchong.md）。
+    allowed = await check_rate_limit(
+        f"comment-report:{reporter.id}",
+        limit=settings.COMMENT_REPORT_RATE_LIMIT,
+        window_seconds=settings.COMMENT_REPORT_RATE_WINDOW_SECONDS,
+    )
+    if not allowed:
+        raise RateLimited("举报提交过于频繁，请稍后再试")
+
     existing = await db.scalar(
         select(Report.id).where(
             Report.reporter_id == reporter.id,
@@ -178,6 +189,22 @@ async def create_comment_report(
     )
     if existing is not None:
         raise Conflict("你已举报过该评论，正在处理中", code="REPORT_ALREADY_OPEN")
+
+    # 未处理上限：单一账号同时挂起的举报数设上限，防止滥发挤占治理资源（buchong.md）。
+    open_count = await db.scalar(
+        select(func.count())
+        .select_from(Report)
+        .where(
+            Report.reporter_id == reporter.id,
+            Report.comment_id.is_not(None),
+            Report.status.in_([s.value for s in ACTIVE_REPORT_STATUSES]),
+        )
+    )
+    if open_count >= settings.COMMENT_REPORT_OPEN_CAP:
+        raise RateLimited(
+            "你的举报待处理数量已达上限，请等待处理后再提交",
+            code="REPORT_OPEN_CAP_EXCEEDED",
+        )
 
     report = Report(
         resource_id=resource_id,
@@ -370,11 +397,35 @@ async def create_comment_appeal(
     if not comment.is_hidden:
         raise Conflict("该评论未被隐藏，无需申诉")
 
+    # 频控：按用户维度限制申诉提交速率，避免单一账号刷爆治理队列（buchong.md）。
+    allowed = await check_rate_limit(
+        f"comment-appeal:{appellant.id}",
+        limit=settings.COMMENT_APPEAL_RATE_LIMIT,
+        window_seconds=settings.COMMENT_APPEAL_RATE_WINDOW_SECONDS,
+    )
+    if not allowed:
+        raise RateLimited("申诉提交过于频繁，请稍后再试")
+
     existing = await db.scalar(
         select(CommentAppeal.id).where(CommentAppeal.comment_id == comment_id)
     )
     if existing is not None:
         raise Conflict("该评论已提交过申诉", code="APPEAL_ALREADY_EXISTS")
+
+    # 未处理上限：单一账号同时挂起的申诉数设上限，防止滥发（buchong.md）。
+    open_count = await db.scalar(
+        select(func.count())
+        .select_from(CommentAppeal)
+        .where(
+            CommentAppeal.appellant_id == appellant.id,
+            CommentAppeal.status == AppealStatus.PENDING.value,
+        )
+    )
+    if open_count >= settings.COMMENT_APPEAL_OPEN_CAP:
+        raise RateLimited(
+            "你的申诉待处理数量已达上限，请等待处理后再提交",
+            code="APPEAL_OPEN_CAP_EXCEEDED",
+        )
 
     appeal = CommentAppeal(
         comment_id=comment_id,

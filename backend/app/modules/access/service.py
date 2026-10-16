@@ -12,13 +12,14 @@ import uuid
 from datetime import datetime, timedelta, timezone
 from typing import TYPE_CHECKING
 
-from sqlalchemy import Uuid, bindparam, func, select, text
+from sqlalchemy import Uuid, bindparam, func, select, text, update
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import settings
 from app.core import idempotency as idem
 from app.core.audit import record_audit
+from app.core.ratelimit import cache_delete
 from app.core.enums import (
     Capability,
     DerivativeKind,
@@ -234,7 +235,7 @@ async def issue_preview_grant(
     await authorize(db, user=user, resource_id=resource_id, version_id=version_id, capability=Capability.PREVIEW)
     if version.preview_disabled:
         raise NotFound("作者已关闭该版本的预览", code="PREVIEW_DISABLED")
-    signed = await storage.presign_download(storage_key, bucket=settings.S3_BUCKET_PRIVATE)
+    signed = await storage.presign_preview_download(storage_key, bucket=settings.S3_BUCKET_PRIVATE)
     grant = PreviewGrant(
         user_id=user.id if user is not None else None,
         resource_id=resource_id,
@@ -242,10 +243,18 @@ async def issue_preview_grant(
         file_id=resource_file.id,
         derivative_id=derivative_id,
         status=GrantStatus.ISSUED.value,
-        valid_until=signed.expires_at,
+        valid_until=_now() + timedelta(seconds=settings.PREVIEW_URL_TTL_SECONDS),
     )
     db.add(grant)
     await db.flush()
+
+    from app.modules.access.watermark_integrity import compute_watermark_token
+
+    watermark_token = compute_watermark_token(
+        user_id=str(user.id) if user is not None else None,
+        resource_id=str(resource_id),
+        version_id=str(version_id),
+    )
 
     return PreviewGrantResult(
         grant_id=grant.id,
@@ -254,7 +263,97 @@ async def issue_preview_grant(
         file_name=resource_file.original_name,
         version_no=version.version_no,
         preview_type=preview_type,
+        watermark_token=watermark_token,
     )
+
+
+# --------------------------------------------------------------------------
+# 预览撤权硬化（§17.1：撤权后已签发的预览凭证不可再被复用，记录可审计）
+# --------------------------------------------------------------------------
+_REVOKABLE_PREVIEW_STATUSES = (
+    GrantStatus.ISSUED.value,
+    GrantStatus.CONSUMED.value,
+)
+
+
+async def revoke_preview_grant(
+    db: AsyncSession,
+    *,
+    actor: "User",
+    grant_id: uuid.UUID,
+    reason: str,
+    request_id: str,
+) -> "PreviewGrant":
+    """撤销单条预览凭证。已撤销则幂等报错，避免重复审计（§29）。"""
+    if not reason or len(reason.strip()) > 255:
+        raise InvalidInput("撤权理由须为 1–255 字")
+    grant = (
+        await db.execute(select(PreviewGrant).where(PreviewGrant.id == grant_id))
+    ).scalar_one_or_none()
+    if grant is None:
+        raise NotFound("预览凭证不存在")
+    if _as_str(grant.status) == GrantStatus.REVOKED.value:
+        raise Conflict("该预览凭证已撤销", code="PREVIEW_GRANT_ALREADY_REVOKED")
+
+    before = {"status": grant.status}
+    grant.status = GrantStatus.REVOKED.value
+    await db.flush()
+    await cache_delete(f"preview-grant:{grant.id}")
+
+    await record_audit(
+        db,
+        action="preview_grant.revoked",
+        object_type="preview_grant",
+        object_id=grant.id,
+        actor_id=actor.id,
+        before=before,
+        after={"status": GrantStatus.REVOKED.value, "reason": reason},
+        reason=reason,
+        request_id=request_id,
+    )
+    return grant
+
+
+async def revoke_resource_previews(
+    db: AsyncSession,
+    *,
+    actor: "User",
+    resource_id: uuid.UUID,
+    reason: str,
+    request_id: str,
+) -> int:
+    """撤销某资源下所有处于活跃状态的预览凭证（版权下架等场景）。
+
+    不删除凭证记录（保留审计事实），只将状态置为 REVOKED；返回受影响条数。
+    资源不存在时由 content 模块抛 NotFound，避免静默空操作。
+    """
+    if not reason or len(reason.strip()) > 255:
+        raise InvalidInput("撤权理由须为 1–255 字")
+    from app.modules.content.service import get_resource
+
+    await get_resource(db, resource_id)  # 不存在抛 NotFound
+
+    result = await db.execute(
+        update(PreviewGrant)
+        .where(
+            PreviewGrant.resource_id == resource_id,
+            PreviewGrant.status.in_(_REVOKABLE_PREVIEW_STATUSES),
+        )
+        .values(status=GrantStatus.REVOKED.value)
+    )
+    count = int(result.rowcount)
+    await cache_delete(f"preview-resource:{resource_id}")
+    await record_audit(
+        db,
+        action="preview_grant.revoked_resource",
+        object_type="resource",
+        object_id=resource_id,
+        actor_id=actor.id,
+        after={"revoked_count": count, "reason": reason},
+        reason=reason,
+        request_id=request_id,
+    )
+    return count
 
 
 async def issue_inspection_grant(db: AsyncSession, *, user, resource_id, version_id, file_id):

@@ -832,6 +832,70 @@ async def delete_account(
     )
 
 
+async def run_retention_cleanup(
+    db: AsyncSession, *, retention_days: int | None = None, now: datetime | None = None
+) -> int:
+    """保留期清理：注销超过保留期且尚未清理的账号，抹除可识别 PII（§9）。
+
+    只处理 status=DELETED、deleted_at 已超保留期、purged_at 为空的账号；
+    邮箱置为带 UUID 的唯一墓碑值（满足唯一约束、不可登录），清空邮箱验证时间，
+    撤销残留会话，打上 purged_at 时间戳。不删除用户行与任何业务/审计/内容记录。
+
+    返回本次清理的账号数。``retention_days``/``now`` 可注入，便于演练与测试。
+    """
+    days = ACCOUNT_RETENTION_DAYS if retention_days is None else retention_days
+    moment = _now() if now is None else now
+    cutoff = moment - timedelta(days=days)
+
+    candidates = list(
+        (
+            await db.execute(
+                select(User).where(
+                    User.status == AccountStatus.DELETED.value,
+                    User.deleted_at.is_not(None),
+                    User.purged_at.is_(None),
+                    User.deleted_at <= cutoff,
+                )
+            )
+        ).scalars()
+        .all()
+    )
+
+    purged = 0
+    for user in candidates:
+        # 邮箱是唯一约束列：用含 UUID 的墓碑值保证全局唯一且不可作为登录凭据。
+        user.email = f"purged+{user.id}@purged.invalid"
+        user.email_verified_at = None
+        user.purged_at = moment
+        # 兜底撤销保留期内可能恢复的会话；注销时已撤销，这里确保彻底失效。
+        await revoke_all_sessions(db, user.id, reason="retention_purged")
+        # 关联邮箱身份一并撤销，避免旧邮箱仍挂在身份声明上（不删记录）。
+        await db.execute(
+            update(UserIdentity)
+            .where(
+                UserIdentity.user_id == user.id,
+                UserIdentity.kind == IdentityKind.EMAIL.value,
+                UserIdentity.revoked_at.is_(None),
+            )
+            .values(revoked_at=moment)
+        )
+        await record_audit(
+            db,
+            action="identity.account_purged",
+            object_type="user",
+            object_id=user.id,
+            after={
+                "purged_at": moment.isoformat(),
+                "retention_days": days,
+            },
+            request_id="retention-cleanup",
+        )
+        purged += 1
+
+    await db.flush()
+    return purged
+
+
 async def export_my_data(db: AsyncSession, *, user: User) -> dict:
     """导出本人数据的 JSON 结构（§9）。
 

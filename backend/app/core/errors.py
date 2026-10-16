@@ -12,6 +12,8 @@ from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
 from starlette.exceptions import HTTPException as StarletteHTTPException
 
+from app.config import settings
+
 DEFAULT_CODES: dict[int, str] = {
     status.HTTP_400_BAD_REQUEST: "BAD_REQUEST",
     status.HTTP_401_UNAUTHORIZED: "UNAUTHENTICATED",
@@ -140,4 +142,17 @@ def install_error_handlers(app: FastAPI) -> None:
         return JSONResponse(
             status_code=exc.status_code,
             content=error_body(code, str(exc.detail), _request_id(request), None),
+        )
+
+    @app.exception_handler(Exception)
+    async def _unhandled_error(request: Request, exc: Exception) -> JSONResponse:
+        # 生产环境不向客户端泄露堆栈/内部路径/配置细节；dev 环境保留异常信息便于排查。
+        if settings.is_prod:
+            return JSONResponse(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                content=error_body("INTERNAL_ERROR", "服务器内部错误", _request_id(request), None),
+            )
+        return JSONResponse(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            content=error_body("INTERNAL_ERROR", str(exc), _request_id(request), None),
         )

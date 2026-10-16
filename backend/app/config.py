@@ -112,6 +112,8 @@ class Settings(BaseSettings):
     # 水印低可见度但可追溯：斜向重复「用户短码 + 日期」，不用破坏阅读的大水印（prevew.md 十二）。
     PREVIEW_WATERMARK_ENABLED: bool = True
     PREVIEW_WATERMARK_OPACITY: int = 28  # 0-255，Alpha 通道
+    # 预览签名 URL 有效期从数分钟级起步，缩短"持有即用的临时凭据"暴露窗口（prevew.md §十二、S05）。
+    PREVIEW_URL_TTL_SECONDS: int = 300
 
     # --- beta11 API 分级限流（pachong.md 三、四）---
     # 第一层规则，按角色分级、可调，不写死；subject 优先取登录用户，其次会话，最后 IP，
@@ -136,6 +138,25 @@ class Settings(BaseSettings):
     RATE_LIMIT_LOGIN: dict[str, int] = {
         "anon": 5, "user": 5, "contributor": 5, "reviewer": 5, "admin": 5,
     }
+
+    # --- beta13 治理队列防滥用（buchong.md）：举报/申诉提交频控与未处理上限 ---
+    # 均为可调默认值，不视为最终策略；频控与上限按用户维度，避免单一账号刷爆治理队列。
+    COMMENT_REPORT_RATE_LIMIT: int = 10
+    COMMENT_REPORT_RATE_WINDOW_SECONDS: int = 3600
+    COMMENT_REPORT_OPEN_CAP: int = 20
+    COMMENT_APPEAL_RATE_LIMIT: int = 5
+    COMMENT_APPEAL_RATE_WINDOW_SECONDS: int = 3600
+    COMMENT_APPEAL_OPEN_CAP: int = 5
+
+    # --- beta13 运营告警（buchong.md）：只读聚合阈值，达到即触发告警，不自动处置 ---
+    # 阈值均为可调默认值，不视为最终策略；告警只展示，不自动执行封禁/清理/回滚。
+    OPS_ALERT_OPEN_REPORTS: int = 50
+    OPS_ALERT_PENDING_REVIEWS: int = 30
+    OPS_ALERT_OPEN_CORRECTIONS: int = 30
+    OPS_ALERT_OPEN_REQUESTS: int = 50
+    OPS_ALERT_FAILED_JOBS: int = 20
+    OPS_ALERT_FAILED_EVENTS: int = 20
+    OPS_ALERT_CRITICAL_MULTIPLIER: int = 3
 
     # --- 邮件（§21：仅用于验证与找回密码）---
     MAIL_ENABLED: bool = False
@@ -164,6 +185,14 @@ class Settings(BaseSettings):
     AI_API_KEY: str = ""
     AI_MODEL: str = ""
     AI_MONTHLY_BUDGET_CENTS: int = 0
+    # --- beta13 AI Gateway 安全基线（rongyu.md、AI对抗攻击防御设计 §6）---
+    # AI 当前默认关闭；以下为启用前的 P0 边界：熔断与调用预算。阈值均为可调默认值，
+    # 不视为最终生产策略；仅作基础构建块，供未来启用 AI 时直接装配（不擅自接线上供应商）。
+    AI_GATEWAY_TIMEOUT_SECONDS: int = 5
+    AI_GATEWAY_FAILURE_THRESHOLD: int = 5
+    AI_GATEWAY_COOLDOWN_SECONDS: int = 30
+    AI_REQUEST_MAX_TOKENS: int = 4000
+    AI_REQUEST_MAX_CALLS: int = 4
 
     @model_validator(mode="after")
     def _validate(self) -> "Settings":

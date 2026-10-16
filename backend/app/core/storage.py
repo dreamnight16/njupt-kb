@@ -254,6 +254,25 @@ class ObjectStorage:
             url=url, expires_at=datetime.now(timezone.utc) + timedelta(seconds=expires_in)
         )
 
+    async def presign_preview_download(
+        self,
+        storage_key: str,
+        *,
+        bucket: str,
+        file_name: str | None = None,
+    ) -> PresignedDownload:
+        """预览专用短期预签名下载：使用 PREVIEW_URL_TTL_SECONDS 而非默认下载有效期。
+
+        预览只提供派生产物（第一页水印 WebP / 受限预览 PDF），缩短"持有即用的临时凭据"
+        暴露窗口（prevew.md §十二、S05）。不改变既有 presign_download 的语义。
+        """
+        return await self.presign_download(
+            storage_key,
+            bucket=bucket,
+            file_name=file_name,
+            expires_in=settings.PREVIEW_URL_TTL_SECONDS,
+        )
+
     async def health(self) -> bool:
         try:
             async with self._semaphore:

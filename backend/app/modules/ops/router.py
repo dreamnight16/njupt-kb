@@ -18,7 +18,7 @@ from app.core.pagination import CursorPage
 from app.core.permissions import OPS_VIEW, USER_SUSPEND, require
 from app.modules.ops import accounts, personal
 from app.modules.ops import service
-from app.modules.ops.schemas import WorkbenchOut
+from app.modules.ops.schemas import OpsAlertsOut, WorkbenchOut
 
 if TYPE_CHECKING:  # pragma: no cover
     from app.modules.identity.models import User
@@ -32,6 +32,15 @@ async def get_workbench(
     db: AsyncSession = Depends(get_db),
 ) -> WorkbenchOut:
     return await service.workbench_summary(db)
+
+
+@router.get("/admin/alerts", response_model=OpsAlertsOut)
+async def get_alerts(
+    user: "User" = Depends(require(OPS_VIEW)),
+    db: AsyncSession = Depends(get_db),
+) -> OpsAlertsOut:
+    """运营告警：达到阈值的指标才返回，供管理员优先处置（buchong.md）。"""
+    return await service.check_ops_alerts(db)
 
 
 @router.get("/me/overview", response_model=personal.PersonalOverview)

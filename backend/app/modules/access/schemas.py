@@ -14,6 +14,22 @@ class PreviewGrantRequest(BaseModel):
     version_id: uuid.UUID
 
 
+class PreviewGrantOut(BaseModel):
+    """预览凭证状态响应（撤权后返回），仅暴露状态与元信息，不含签名 URL。"""
+
+    model_config = ConfigDict(from_attributes=True)
+
+    id: uuid.UUID
+    resource_id: uuid.UUID
+    version_id: uuid.UUID
+    user_id: uuid.UUID | None = None
+    file_id: uuid.UUID | None = None
+    derivative_id: uuid.UUID | None = None
+    status: str
+    valid_until: datetime
+    created_at: datetime
+
+
 class PreviewGrantResult(BaseModel):
     """预览凭证响应：仅提供派生产物的短期访问 URL。
 
@@ -27,6 +43,7 @@ class PreviewGrantResult(BaseModel):
     file_name: str
     version_no: int
     preview_type: str
+    watermark_token: str | None = None
 
 
 class DownloadGrantRequest(BaseModel):
