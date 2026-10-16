@@ -20,6 +20,8 @@ from app.modules.creator.schemas import (
     ContributionOut,
     CreatorLedgerEntryOut,
     CreatorProfileOut,
+    CreatorProfileUpdate,
+    CreatorSelfProfileOut,
     CreatorWithdrawalOut,
     SettlementRunRequest,
     SettlementRunResult,
@@ -35,6 +37,28 @@ async def get_creator_profile(
 ) -> CreatorProfileOut:
     """贡献者公开资料（只读）。"""
     return await service.get_creator_profile(db, user_id)
+
+
+@router.get("/me/creator-profile", response_model=CreatorSelfProfileOut)
+async def get_my_creator_profile(
+    user=Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> CreatorSelfProfileOut:
+    """本人视角的贡献者资料：包含是否公开与未公开的简介原文。"""
+    return await service.get_own_creator_profile(db, user=user)
+
+
+@router.put("/me/creator-profile", response_model=CreatorSelfProfileOut)
+async def update_my_creator_profile(
+    body: CreatorProfileUpdate,
+    user=Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+    request_id: str = Depends(get_request_id),
+) -> CreatorSelfProfileOut:
+    """维护自己的贡献者资料（简介、一句话介绍、是否公开）；不改变账号权限。"""
+    return await service.update_creator_profile(
+        db, user=user, payload=body.model_dump(exclude_unset=True), request_id=request_id
+    )
 
 
 @router.get("/me/contributions", response_model=CursorPage[ContributionOut])

@@ -12,7 +12,7 @@ import uuid
 from datetime import datetime
 from decimal import Decimal
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from app.core.enums import (
     ContributionKind,
@@ -63,6 +63,28 @@ class CreatorProfileOut(BaseModel):
     bio: str | None = None
     avatar_url: str | None = None
     contribution: ContributionSummary
+
+
+class CreatorSelfProfileOut(CreatorProfileOut):
+    """本人视角：额外包含是否公开，且未公开的简介也如实返回，便于回填表单。"""
+
+    is_public: bool = True
+
+
+class CreatorProfileUpdate(_InputModel):
+    """PATCH 语义：字段缺席表示不改，显式 null 表示清空（is_public 除外）。"""
+
+    headline: str | None = Field(default=None, max_length=200)
+    bio: str | None = Field(default=None, max_length=2000)
+    is_public: bool | None = None
+
+    @field_validator("headline", "bio")
+    @classmethod
+    def _strip_text(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
+        cleaned = value.strip()
+        return cleaned or None
 
 
 # --- 收益相关（P3，经 commerce 提供）---

@@ -4,6 +4,7 @@ import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 import { useEffect, useRef, useState } from 'react';
 import {
+  Award,
   Bell,
   BookOpen,
   ChevronDown,
@@ -133,6 +134,7 @@ export function AppHeader() {
                       )}
                     </div>
                     <MenuLink href="/me/resources" icon={BookOpen} label="我的资料" />
+                    <MenuLink href="/me/contributions" icon={Award} label="我的贡献" />
                     <MenuLink href="/me/profile" icon={UserCog} label="个人资料" />
                     <MenuLink href="/me/favorites" icon={Heart} label="我的收藏" />
                     <MenuLink href="/me/follows" icon={BookOpen} label="我的关注" />

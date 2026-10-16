@@ -148,6 +148,9 @@ class ResourceDetailOut(BaseModel):
     id: uuid.UUID
     course_id: uuid.UUID
     offering_id: uuid.UUID | None
+    # 贡献者公开身份：贡献者主页按 owner_id 只读展示（§24.1）。
+    owner_id: uuid.UUID
+    owner_display_name: str
     resource_type: ResourceType
     publication_status: PublicationStatus
     freshness_status: FreshnessStatus

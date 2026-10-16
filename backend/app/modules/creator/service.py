@@ -20,6 +20,7 @@ from sqlalchemy import and_, func, or_, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.audit import record_audit
 from app.core.enums import ContributionKind
 from app.core.errors import InvalidInput
 from app.core.pagination import (
@@ -34,6 +35,7 @@ from app.modules.creator.schemas import (
     ContributionSummary,
     CreatorLedgerEntryOut,
     CreatorProfileOut,
+    CreatorSelfProfileOut,
     CreatorSettlementOut,
     CreatorWithdrawalOut,
     SettlementRunRequest,
@@ -179,10 +181,11 @@ async def get_creator_profile(db: AsyncSession, user_id: uuid.UUID) -> CreatorPr
     if profile is not None and profile.is_public:
         return CreatorProfileOut(
             user_id=user_id,
-            display_name=profile.display_name,
+            display_name=display_name_of(user),
             headline=profile.headline,
             bio=profile.bio,
-            avatar_url=profile.avatar_url,
+            # 昵称与头像始终以账号资料为准，避免两处长期不一致。
+            avatar_url=getattr(getattr(user, "profile", None), "avatar_url", None),
             contribution=summary,
         )
     # 无资料或未公开：只回退到账号显示名与贡献汇总，不编造资料。
@@ -194,6 +197,60 @@ async def get_creator_profile(db: AsyncSession, user_id: uuid.UUID) -> CreatorPr
         avatar_url=None,
         contribution=summary,
     )
+
+
+async def get_own_creator_profile(db: AsyncSession, *, user: "User") -> CreatorSelfProfileOut:
+    """本人视角：返回未公开的简介原文与是否公开，便于回填编辑表单。"""
+    from app.modules.identity.service import display_name_of
+
+    profile = (
+        await db.execute(select(CreatorProfile).where(CreatorProfile.user_id == user.id))
+    ).scalar_one_or_none()
+    summary = await contribution_summary(db, user.id)
+    account = getattr(user, "profile", None)
+    return CreatorSelfProfileOut(
+        user_id=user.id,
+        display_name=display_name_of(user),
+        headline=profile.headline if profile else None,
+        bio=profile.bio if profile else None,
+        avatar_url=getattr(account, "avatar_url", None),
+        is_public=profile.is_public if profile else True,
+        contribution=summary,
+    )
+
+
+async def update_creator_profile(
+    db: AsyncSession, *, user: "User", payload: dict, request_id: str | None
+) -> CreatorSelfProfileOut:
+    """维护自己的贡献者资料；昵称与头像跟随账号资料，不在此重复维护（§24.1）。"""
+    from app.modules.identity.service import display_name_of
+
+    profile = (
+        await db.execute(select(CreatorProfile).where(CreatorProfile.user_id == user.id))
+    ).scalar_one_or_none()
+    if profile is None:
+        # display_name 非空，建档时写入账号昵称占位；读取仍以账号资料为准。
+        profile = CreatorProfile(user_id=user.id, display_name=display_name_of(user))
+        db.add(profile)
+        await db.flush()
+
+    # headline/bio 显式传 null 表示清空；is_public 为布尔，缺席即不改。
+    for field in ("headline", "bio"):
+        if field in payload:
+            setattr(profile, field, payload[field])
+    if payload.get("is_public") is not None:
+        profile.is_public = payload["is_public"]
+
+    await record_audit(
+        db,
+        action="creator.profile_updated",
+        object_type="user",
+        object_id=user.id,
+        actor_id=user.id,
+        after={"changed_fields": sorted(payload)},
+        request_id=request_id,
+    )
+    return await get_own_creator_profile(db, user=user)
 
 
 # --------------------------------------------------------------------------

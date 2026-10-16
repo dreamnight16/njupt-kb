@@ -4,6 +4,7 @@ import { notFound } from 'next/navigation';
 
 import { Notice } from '@/components/common/Notice';
 import { ResourceActions } from '@/components/resource/ResourceActions';
+import { ResourceComments } from '@/components/resource/ResourceComments';
 import type { CourseDetail } from '@/lib/api/catalog';
 import type { ResourceDetailOut, VersionFilesOut } from '@/lib/api/content';
 import { serverFetch } from '@/lib/api/server';
@@ -91,6 +92,15 @@ export default async function ResourceDetailPage({
             )}
           </span>
           <span>{freshnessLabels[resource.freshness_status] ?? resource.freshness_status}</span>
+          <span>
+            贡献者{' '}
+            <Link
+              href={`/creators/${resource.owner_id}`}
+              className="underline underline-offset-2"
+            >
+              {resource.owner_display_name}
+            </Link>
+          </span>
           <span>更新于 {formatDateTime(resource.updated_at)}</span>
         </div>
       </header>
@@ -149,6 +159,15 @@ export default async function ResourceDetailPage({
           如果内容有误、包含不应公开的信息，或你不清楚来源是否允许分发，请通过资料页的「举报/纠错」提交。
           举报会进入独立工单，受理不等于认定违规。
         </p>
+      </section>
+
+      <section aria-labelledby="resource-comments">
+        <h2 id="resource-comments" className="dn-display text-2xl">
+          讨论
+        </h2>
+        <div className="mt-3">
+          <ResourceComments resourceId={resource.id} />
+        </div>
       </section>
     </div>
   );

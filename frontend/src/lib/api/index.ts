@@ -14,6 +14,7 @@ export {
 export * as authApi from './auth';
 export * as catalogApi from './catalog';
 export * as contentApi from './content';
+export * as creatorApi from './creator';
 export * as accessApi from './access';
 export * as interactionApi from './interaction';
 export * as notificationApi from './notification';

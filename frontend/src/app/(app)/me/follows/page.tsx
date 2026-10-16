@@ -71,7 +71,12 @@ export default function MyFollowsPage() {
                             {courseName ?? `课程 ${item.target_id.slice(0, 8)}…`}
                           </Link>
                         ) : (
-                          (creatorName ?? `用户 ${item.target_id.slice(0, 8)}…`)
+                          <Link
+                            href={`/creators/${item.target_id}`}
+                            className="underline underline-offset-2 hover:text-text-primary"
+                          >
+                            {creatorName ?? `用户 ${item.target_id.slice(0, 8)}…`}
+                          </Link>
                         )
                       ) : (
                         <span className="text-text-secondary">

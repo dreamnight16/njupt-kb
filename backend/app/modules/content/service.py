@@ -401,6 +401,15 @@ async def correct_classification(
                        reason=reason, request_id=request_id)
 
 
+async def _owner_display_name(db: AsyncSession, owner_id: uuid.UUID) -> str:
+    """贡献者公开显示名；账号已注销时用匿名占位，不泄露账号信息（§24.1、§29）。"""
+    from app.modules.identity.service import display_name_of, get_users
+
+    users = await get_users(db, [owner_id])
+    owner = users.get(owner_id)
+    return display_name_of(owner) if owner is not None else "用户"
+
+
 def _version_out(version: ResourceVersion) -> VersionOut:
     return VersionOut(
         id=version.id,
@@ -847,6 +856,8 @@ async def get_resource_detail(db: AsyncSession, *, user, resource_id: uuid.UUID)
         id=resource.id,
         course_id=resource.course_id,
         offering_id=resource.offering_id,
+        owner_id=resource.owner_id,
+        owner_display_name=await _owner_display_name(db, resource.owner_id),
         resource_type=resource.resource_type,
         publication_status=PublicationStatus(resource.publication_status),
         freshness_status=FreshnessStatus(resource.freshness_status),
@@ -867,6 +878,7 @@ async def list_resources(
     college_id: uuid.UUID | None = None,
     offering_id: uuid.UUID | None = None,
     semester_id: uuid.UUID | None = None,
+    owner_id: uuid.UUID | None = None,
     year: int | None = None,
     resource_type=None,
     keyword: str | None = None,
@@ -887,6 +899,9 @@ async def list_resources(
     )
     if course_id is not None:
         stmt = stmt.where(Resource.course_id == course_id)
+    if owner_id is not None:
+        # 贡献者主页按作者过滤；可见范围仍由 visible_resource_ids 决定，不扩大权限。
+        stmt = stmt.where(Resource.owner_id == owner_id)
     if offering_id is not None:
         stmt = stmt.where(Resource.offering_id == offering_id)
     if resource_type is not None:

@@ -145,7 +145,15 @@ async def record_contribution(
 ) -> None
 # 有效贡献 ≠ 授权链接次数（§24.1）。自下载、重复刷取不得计入。
 async def contribution_summary(db: AsyncSession, user_id: uuid.UUID) -> ContributionSummary
+async def get_creator_profile(db: AsyncSession, user_id: uuid.UUID) -> CreatorProfileOut
+# 公开视角：未公开或无资料时只回退到账号昵称与贡献汇总，不编造资料。
+async def get_own_creator_profile(db: AsyncSession, *, user) -> CreatorSelfProfileOut
+# 本人视角：额外返回 is_public，且未公开的 headline/bio 也如实返回，便于回填表单。
+async def update_creator_profile(db: AsyncSession, *, user, payload: dict, request_id: str | None) -> CreatorSelfProfileOut
+# headline/bio 显式传 null 表示清空；is_public 缺席即不改。昵称/头像不在此维护。
 ```
+
+`GET /me/creator-profile` 与 `PUT /me/creator-profile` 分别对应上述两个函数；贡献者公开资料另有 `GET /creators/{user_id}`。
 
 ## commerce
 
@@ -165,6 +173,14 @@ async def confirm_payment(db: AsyncSession, *, channel: str, payload: dict) -> P
 - `POST /admin/corrections/{id}/classification`：`expected_revision`、`resolution_note`；需要 `catalog.manage` 与 `correction.handle`。事务内调用 `content.service.correct_classification` 校验公开版本与修订号，更正资源分类，随后标记工单已修复并通知。过期快照返回 409。
 - `GET/PATCH /me` 增加可选 `gender`、`bio`。头像使用不带账号密码的 HTTPS 地址，现有 `avatar_url` 继续可清空；新增字段仅通过本人接口返回。
 - `POST /me/avatar`：`multipart/form-data` 单文件字段 `file`，仅接受 PNG/JPEG/WebP 且不超过 `AVATAR_MAX_SIZE_BYTES`（默认 2 MiB）。按真实字节用 Pillow 校验格式，写入公开桶 `S3_BUCKET_PUBLIC` 并返回更新后的 `MeResponse`；地址由 `S3_PUBLIC_BASE_URL`（留空时回退 `S3_PUBLIC_ENDPOINT_URL` + 桶名）拼装。头像不走隔离区扫描，也不能用它替代资料文件上传。
+
+## beta6 共建与质量扩展
+
+- `GET /resources` 增加 `owner_id` 过滤（贡献者主页用）；可见范围仍由 `visible_resource_ids` 决定，不扩大权限。
+- `ResourceDetailOut` 增加 `owner_id` 与 `owner_display_name`（贡献者公开昵称；账号注销后回退匿名占位），用于跳转贡献者主页。
+- `GET /creators/{user_id}`：公开资料 + 贡献汇总；`is_public=false` 时只返回账号昵称与贡献汇总。
+- `GET/PUT /me/creator-profile`：本人维护 `headline`、`bio`、`is_public`；不改变账号权限，写入 `creator.profile_updated` 审计。
+- 评论沿用既有 `GET/POST /resources/{id}/comments`；`parent_id` 表示一层回复，前端不做无限嵌套。
 
 ## ai
 

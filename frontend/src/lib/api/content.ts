@@ -136,6 +136,9 @@ export interface ResourceDetailOut {
   id: string;
   course_id: string;
   offering_id: string | null;
+  /** 贡献者公开身份，用于跳转贡献者主页（§24.1）。 */
+  owner_id: string;
+  owner_display_name: string;
   resource_type: ResourceType;
   publication_status: PublicationStatus;
   freshness_status: FreshnessStatus;
@@ -227,6 +230,8 @@ export interface ResourceListParams {
   college_id?: string;
   offering_id?: string;
   semester_id?: string;
+  /** 按贡献者过滤，用于贡献者主页；可见范围仍由服务端权限决定。 */
+  owner_id?: string;
   year?: number;
   resource_type?: ResourceType;
   keyword?: string;
