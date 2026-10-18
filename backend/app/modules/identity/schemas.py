@@ -16,6 +16,17 @@ class RegisterRequest(BaseModel):
     email: EmailStr
     password: str
     display_name: str | None = Field(default=None, max_length=80)
+    # 图形验证码：CAPTCHA_ENABLED=true 时必填，防批量注册（§13）。
+    captcha_id: str | None = None
+    captcha_code: str | None = None
+
+
+class CaptchaOut(BaseModel):
+    """图形验证码：一次性挑战号 + PNG data URL（image/* base64），答案只在服务端比对。"""
+
+    captcha_id: uuid.UUID
+    image: str
+    ttl: int
 
 
 class RegisterResponse(BaseModel):

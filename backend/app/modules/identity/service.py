@@ -7,7 +7,10 @@
 from __future__ import annotations
 
 import asyncio
+import base64
+import io
 import logging
+import secrets
 import smtplib
 import uuid
 from collections.abc import Sequence
@@ -47,6 +50,7 @@ from app.core.security import (
 from app.db import async_session_factory
 from app.modules.identity.models import (
     AuthToken,
+    CaptchaChallenge,
     EmailChangeRequest,
     Session,
     User,
@@ -234,10 +238,22 @@ async def register(
     password: str,
     display_name: str | None,
     request_id: str | None,
+    captcha_id: str | None = None,
+    captcha_code: str | None = None,
+    client_ip: str | None = None,
 ) -> tuple[User, bool]:
     problem = password_problem(password)
     if problem:
         raise InvalidInput(problem)
+
+    # 图形验证码先于任何用户行创建：校验失败不留下半成品账号（§13 防刷）。
+    if settings.CAPTCHA_ENABLED:
+        if not captcha_id or not captcha_code:
+            raise InvalidInput("请填写图形验证码", code="CAPTCHA_REQUIRED")
+        if not await verify_captcha(
+            db, captcha_id=captcha_id, code=captcha_code, client_ip=client_ip
+        ):
+            raise InvalidInput("图形验证码不正确或已过期", code="CAPTCHA_INVALID")
 
     normalized = _normalize_email(email)
     # 唯一约束是最终防线，这里先查一次给出明确冲突（§29 重复注册）。
@@ -248,11 +264,20 @@ async def register(
         raise Conflict("该邮箱已注册", code="EMAIL_ALREADY_REGISTERED")
 
     name = (display_name or "").strip()[:80] or normalized.split("@")[0]
+    mail_enabled = settings.MAIL_ENABLED
+    # 无发信（本地/自建开发）：注册即置为已验证并激活，保证注册流程可实际跑通；
+    # 接了 SMTP 则保持待验证，走邮件确认链接，不假装已验证。
+    now = _now()
     user = User(
         email=normalized,
         password_hash=hash_password(password),
         role=Role.USER.value,
-        status=AccountStatus.PENDING_VERIFICATION.value,
+        status=(
+            AccountStatus.ACTIVE.value
+            if not mail_enabled
+            else AccountStatus.PENDING_VERIFICATION.value
+        ),
+        email_verified_at=None if mail_enabled else now,
     )
     db.add(user)
     await db.flush()
@@ -263,27 +288,36 @@ async def register(
             user_id=user.id,
             kind=IdentityKind.EMAIL.value,
             identifier=normalized,
-            status=IdentityStatus.PENDING.value,
+            status=(
+                IdentityStatus.VERIFIED.value
+                if not mail_enabled
+                else IdentityStatus.PENDING.value
+            ),
+            verified_at=None if mail_enabled else now,
+            verified_source=None if mail_enabled else "self_registration_no_smtp",
         )
     )
 
-    raw = await _issue_token(
-        db,
-        user_id=user.id,
-        purpose=AuthTokenPurpose.EMAIL_VERIFICATION,
-        ttl=timedelta(hours=EMAIL_VERIFICATION_TTL_HOURS),
-    )
-    link = _verification_link("/verify-email", raw)
-    sent = await _deliver_mail(
-        to=normalized,
-        subject="验证你的邮箱",
-        body=(
-            f"请在 {EMAIL_VERIFICATION_TTL_HOURS} 小时内打开以下链接完成邮箱验证：\n{link}\n"
-            "验证邮箱只表示你当时控制该邮箱，不代表完成官方学生身份认证。"
-        ),
-        log_event="email_verification_token",
-        log_extra={"user_id": str(user.id), "email": normalized, "verification_url": link},
-    )
+    sent = False
+    raw: str | None = None
+    if mail_enabled:
+        raw = await _issue_token(
+            db,
+            user_id=user.id,
+            purpose=AuthTokenPurpose.EMAIL_VERIFICATION,
+            ttl=timedelta(hours=EMAIL_VERIFICATION_TTL_HOURS),
+        )
+        link = _verification_link("/verify-email", raw)
+        sent = await _deliver_mail(
+            to=normalized,
+            subject="验证你的邮箱",
+            body=(
+                f"请在 {EMAIL_VERIFICATION_TTL_HOURS} 小时内打开以下链接完成邮箱验证：\n{link}\n"
+                "验证邮箱只表示你当时控制该邮箱，不代表完成官方学生身份认证。"
+            ),
+            log_event="email_verification_token",
+            log_extra={"user_id": str(user.id), "email": normalized, "verification_url": link},
+        )
 
     await record_audit(
         db,
@@ -291,7 +325,11 @@ async def register(
         object_type="user",
         object_id=user.id,
         actor_id=user.id,
-        after={"status": user.status, "role": user.role, "email_verified": False},
+        after={
+            "status": user.status,
+            "role": user.role,
+            "email_verified": user.email_verified_at is not None,
+        },
         request_id=request_id,
     )
     return user, sent
@@ -1414,3 +1452,130 @@ async def confirm_email_change(
     )
     await db.flush()
     return ActionMessage(message="邮箱已更换，请使用新邮箱重新登录")
+
+
+# --- 图形验证码（0.0.3，§13 注册防刷）--------------------------------------- #
+# 去掉易混淆字符：0/O、1/I/L、2/Z、5/S、8/B 不做区分，降低用户挫败感。
+CAPTCHA_ALPHABET = "ACDEFGHJKMNPQRTUVWXY34679"
+
+
+def _render_captcha_png(code: str, *, width: int = 168, height: int = 60) -> bytes:
+    """服务端渲染验证码 PNG：干扰线 + 噪点 + 逐字抖动着色。仅本地生成，无外部依赖。"""
+    from PIL import Image, ImageDraw, ImageFont
+
+    image = Image.new("RGB", (width, height), (249, 251, 250))
+    draw = ImageDraw.Draw(image)
+
+    def _font(size: int) -> ImageFont.FreeTypeFont:
+        for candidate in ("DejaVuSans-Bold.ttf", "Arial Bold.ttf", "arialbd.ttf"):
+            try:
+                return ImageFont.truetype(candidate, size)
+            except Exception:  # noqa: BLE001 - 逐候选回退，最终用内置字体
+                continue
+        return ImageFont.load_default(size=size)
+
+    font = _font(36)
+    for _ in range(7):
+        draw.line(
+            [
+                (secrets.randbelow(width), secrets.randbelow(height)),
+                (secrets.randbelow(width), secrets.randbelow(height)),
+            ],
+            fill=(206, 219, 216),
+            width=1,
+        )
+    palette = [
+        (37, 59, 57),
+        (89, 170, 165),
+        (70, 178, 209),
+        (161, 139, 200),
+        (201, 138, 116),
+    ]
+    if code:
+        slot = width // (len(code) + 1)
+        for index, char in enumerate(code):
+            top = max(2, (height - 40) // 2 + secrets.randbelow(9) - 4)
+            draw.text(
+                (slot * (index + 1), top),
+                char,
+                font=font,
+                fill=palette[index % len(palette)],
+            )
+    for _ in range(50):
+        draw.point(
+            (secrets.randbelow(width), secrets.randbelow(height)),
+            fill=(139, 163, 150),
+        )
+
+    buffer = io.BytesIO()
+    image.save(buffer, format="PNG")
+    return buffer.getvalue()
+
+
+async def create_captcha(
+    db: AsyncSession,
+    *,
+    purpose: str = "register",
+    client_ip: str | None = None,
+) -> tuple[uuid.UUID, str]:
+    """生成一次性验证码：返回 (挑战号, PNG data URL)。答案只存 SHA-256 摘要（§14.2）。"""
+    if client_ip and not await ratelimit.check_rate_limit(
+        f"captcha:ip:{client_ip}",
+        limit=settings.CAPTCHA_RATE_LIMIT_PER_HOUR,
+        window_seconds=3600,
+    ):
+        raise RateLimited("验证码请求过于频繁，请稍后再试")
+
+    length = max(3, min(6, settings.CAPTCHA_LENGTH))
+    code = "".join(secrets.choice(CAPTCHA_ALPHABET) for _ in range(length))
+    png = await asyncio.to_thread(_render_captcha_png, code)
+    challenge = CaptchaChallenge(
+        purpose=purpose,
+        code_hash=token_digest(code),
+        expires_at=_now() + timedelta(seconds=settings.CAPTCHA_TTL_SECONDS),
+        client_ip=client_ip,
+    )
+    db.add(challenge)
+    await db.flush()
+    data_url = "data:image/png;base64," + base64.b64encode(png).decode("ascii")
+    return challenge.id, data_url
+
+
+async def verify_captcha(
+    db: AsyncSession,
+    *,
+    captcha_id: str,
+    code: str,
+    client_ip: str | None = None,
+) -> bool:
+    """一次性校验：常数时间比对 + 过期/已用/超限均判失败，不区分原因以防枚举。"""
+    try:
+        cid = uuid.UUID(str(captcha_id))
+    except (ValueError, AttributeError, TypeError):
+        return False
+    if client_ip and not await ratelimit.check_rate_limit(
+        f"captcha_verify:ip:{client_ip}",
+        limit=settings.CAPTCHA_VERIFY_LIMIT_PER_HOUR,
+        window_seconds=3600,
+    ):
+        return False
+
+    challenge = await db.get(CaptchaChallenge, cid)
+    now = _now()
+    if challenge is None or challenge.consumed_at is not None:
+        return False
+    if _aware(challenge.expires_at) <= now:
+        return False
+    challenge.attempts += 1
+    if challenge.attempts > settings.CAPTCHA_MAX_ATTEMPTS:
+        # 连续错误超过阈值即作废本条，逼迫重新取码。
+        challenge.consumed_at = now
+        await db.flush()
+        return False
+    provided = token_digest((code or "").strip().upper())
+    if secrets.compare_digest(provided, challenge.code_hash):
+        challenge.consumed_at = now
+        await db.flush()
+        return True
+    await db.flush()
+    return False

@@ -27,6 +27,7 @@ from app.modules.identity import service
 from app.modules.identity.models import Session, User
 from app.modules.identity.schemas import (
     ActionMessage,
+    CaptchaOut,
     CsrfResponse,
     DeletionRequest,
     EmailChangeConfirmRequest,
@@ -83,6 +84,7 @@ async def current_session(
 )
 async def register(
     payload: RegisterRequest,
+    request: Request,
     db: AsyncSession = Depends(get_db),
     request_id: str = Depends(get_request_id),
 ) -> RegisterResponse:
@@ -92,17 +94,29 @@ async def register(
         password=payload.password,
         display_name=payload.display_name,
         request_id=request_id,
+        captcha_id=payload.captcha_id,
+        captcha_code=payload.captcha_code,
+        client_ip=get_client_ip(request),
     )
+    # 无发信环境注册即激活；接了 SMTP 则等待邮箱确认，两种都如实返回（§21）。
+    verified_now = user.email_verified_at is not None
     return RegisterResponse(
         id=user.id,
         email=user.email,
         status=user.status,
         email_verification_sent=sent,
-        message="注册成功，请完成邮箱验证后使用",
+        message=(
+            "注册成功，账号已激活，可直接登录使用"
+            if verified_now
+            else "注册成功，请完成邮箱验证后使用"
+        ),
         note=(
             None
             if sent
-            else "开发环境未发送邮件（MAIL_ENABLED=false）：验证链接已写入服务端结构化日志"
+            else (
+                "未配置邮件服务（MAIL_ENABLED=false）：注册即视为已验证并激活，"
+                "接入 SMTP 后注册将改为邮箱确认流程"
+            )
         ),
     )
 
@@ -185,6 +199,19 @@ async def confirm_password_reset(
         db, token=payload.token, new_password=payload.new_password, request_id=request_id
     )
     return ActionMessage(message="密码已重置，所有登录会话已失效，请重新登录")
+
+
+@router.get("/auth/captcha", response_model=CaptchaOut)
+async def get_captcha(
+    request: Request,
+    db: AsyncSession = Depends(get_db),
+    purpose: str = Query("register", pattern="^(register|login)$"),
+) -> CaptchaOut:
+    """图形验证码：PNG data URL + 一次性挑战号。按 IP 限流，答案只在服务端比对（§13）。"""
+    captcha_id, image = await service.create_captcha(
+        db, purpose=purpose, client_ip=get_client_ip(request)
+    )
+    return CaptchaOut(captcha_id=captcha_id, image=image, ttl=settings.CAPTCHA_TTL_SECONDS)
 
 
 @router.get("/auth/csrf", response_model=CsrfResponse)
