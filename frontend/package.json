@@ -5,6 +5,8 @@
   "scripts": {
     "dev": "next dev",
     "build": "next build",
+    "build:protected": "next build && node scripts/obfuscate-selected-chunks.mjs",
+    "obfuscate": "node scripts/obfuscate-selected-chunks.mjs",
     "start": "next start",
     "lint": "eslint",
     "check:artifacts": "node scripts/check-public-artifacts.mjs"
@@ -29,6 +31,9 @@
     "@types/react-dom": "^19",
     "eslint": "^9",
     "eslint-config-next": "16.4.2",
+    "javascript-obfuscator": "^4.1.1",
+    "react-markdown": "^10.1.0",
+    "remark-gfm": "^4.0.1",
     "tailwindcss": "^4",
     "typescript": "^5"
   }

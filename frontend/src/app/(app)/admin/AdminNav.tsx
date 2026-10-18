@@ -21,6 +21,8 @@ export const adminItems = [
   { href: '/admin/assignments', label: '权限分配', permission: 'assignment.manage' },
   { href: '/admin/metrics', label: '指标', permission: 'metrics.view' },
   { href: '/admin/analytics', label: '数据分析', permission: 'metrics.view' },
+  { href: '/admin/guides', label: '攻略审核', permission: 'resource.review' },
+  { href: '/admin/defense', label: '主动防御', permission: 'defense.manage' },
   { href: '/admin/pricing', label: '价格方案', permission: 'price.confirm' },
   { href: '/admin/settlements', label: '结算管理', permission: 'settlement.manage' },
   { href: '/admin/payouts', label: '付款核对', permission: 'payout.manage' },

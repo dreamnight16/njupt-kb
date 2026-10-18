@@ -145,6 +145,7 @@ export function AppHeader() {
                     <MenuLink href="/me" icon={UserCog} label="个人总览" />
                     <MenuLink href="/me/resources" icon={BookOpen} label="我的资料" />
                     <MenuLink href="/me/contributions" icon={Award} label="我的贡献" />
+                    <MenuLink href="/me/guides" icon={BookOpen} label="我的攻略" />
                     <MenuLink href="/me/contributor-application" icon={UserPlus} label="入驻申请" />
                     <MenuLink href="/me/cases" icon={Gavel} label="我的案件" />
                     <MenuLink href="/me/agreements" icon={ScrollText} label="我的协议" />

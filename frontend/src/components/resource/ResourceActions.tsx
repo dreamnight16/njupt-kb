@@ -76,6 +76,9 @@ export function ResourceActions({
   const [previewing, setPreviewing] = useState(false);
   const [previewUrl, setPreviewUrl] = useState<string | null>(null);
   const [previewType, setPreviewType] = useState<PreviewGrantResult['preview_type']>('pdf');
+  // 多页预览：逐页 URL；没有 pages 字段时退化为单页。
+  const [previewPages, setPreviewPages] = useState<NonNullable<PreviewGrantResult['pages']>>([]);
+  const [previewPageIndex, setPreviewPageIndex] = useState(0);
   const [previewImageLoading, setPreviewImageLoading] = useState(false);
   const [previewImageFailed, setPreviewImageFailed] = useState(false);
   const downloadKeys = useRef(new Map<string, string>());
@@ -143,7 +146,19 @@ export function ResourceActions({
     setPreviewing(true);
     try {
       const grant = await createPreviewGrant(resourceId, versionId);
-      setPreviewUrl(grant.preview_url);
+      const pages =
+        grant.pages && grant.pages.length > 0
+          ? grant.pages
+          : [
+              {
+                page_no: 1,
+                url: grant.preview_url,
+                url_expires_at: grant.url_expires_at,
+              },
+            ];
+      setPreviewPages(pages);
+      setPreviewPageIndex(0);
+      setPreviewUrl(pages[0].url);
       setPreviewType(grant.preview_type ?? 'pdf');
       setPreviewImageLoading(true);
       setPreviewImageFailed(false);
@@ -153,6 +168,20 @@ export function ResourceActions({
     } finally {
       setPreviewing(false);
     }
+  }
+
+  function closePreview() {
+    setPreviewUrl(null);
+    setPreviewPages([]);
+    setPreviewPageIndex(0);
+  }
+
+  function goToPreviewPage(next: number) {
+    if (next < 0 || next >= previewPages.length) return;
+    setPreviewPageIndex(next);
+    setPreviewUrl(previewPages[next].url);
+    setPreviewImageLoading(true);
+    setPreviewImageFailed(false);
   }
 
   async function handleDownload(file: FileOut) {
@@ -202,7 +231,7 @@ export function ResourceActions({
 
   return (
     <div className="space-y-6">
-      <Modal isOpen={!!previewUrl} onClose={() => setPreviewUrl(null)} title="资料预览">
+      <Modal isOpen={!!previewUrl} onClose={closePreview} title="资料预览">
         {previewUrl && (
           <>
             {previewType === 'image' ? (
@@ -213,12 +242,16 @@ export function ResourceActions({
               ) : (
                 <div>
                   {previewImageLoading && <Skeleton className="h-[65vh] w-full" />}
-                  {/* 第一页图片预览：服务端只渲染第一页并加水印，浏览器拿到的不是完整 PDF（prevew.md 五）。 */}
+                  {/* 多页图片预览：服务端逐页渲染并加水印，浏览器拿到的不是完整 PDF（prevew.md 五）。 */}
                   {/* Signed private URL must bypass the shared image optimizer. */}
                   {/* eslint-disable-next-line @next/next/no-img-element */}
                   <img
                     src={previewUrl}
-                    alt={resourceTitle ? `${resourceTitle} 第一页预览` : '资料第一页预览'}
+                    alt={
+                      resourceTitle
+                        ? `${resourceTitle} 第 ${previewPageIndex + 1} 页预览`
+                        : `资料第 ${previewPageIndex + 1} 页预览`
+                    }
                     onLoad={() => setPreviewImageLoading(false)}
                     onError={() => {
                       setPreviewImageLoading(false);
@@ -226,6 +259,29 @@ export function ResourceActions({
                     }}
                     className="block max-h-[65vh] w-full object-contain"
                   />
+                  {previewPages.length > 1 && (
+                    <div className="mt-3 flex flex-wrap items-center justify-between gap-2 border-t border-divider pt-3">
+                      <Button
+                        variant="secondary"
+                        size="sm"
+                        onClick={() => goToPreviewPage(previewPageIndex - 1)}
+                        disabled={previewPageIndex <= 0}
+                      >
+                        上一页
+                      </Button>
+                      <p className="text-sm text-text-secondary">
+                        第 {previewPageIndex + 1} / {previewPages.length} 页（仅提供前 {previewPages.length} 页）
+                      </p>
+                      <Button
+                        variant="secondary"
+                        size="sm"
+                        onClick={() => goToPreviewPage(previewPageIndex + 1)}
+                        disabled={previewPageIndex >= previewPages.length - 1}
+                      >
+                        下一页
+                      </Button>
+                    </div>
+                  )}
                 </div>
               )
             ) : (
