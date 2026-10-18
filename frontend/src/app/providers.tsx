@@ -23,6 +23,13 @@ export function Providers({ children }: { children: React.ReactNode }) {
   );
 
   useEffect(() => {
+    // 账号变化时清除上一账号的数据与进行中的请求，避免复用个人页/管理页缓存。
+    return useAuthStore.subscribe((state, previous) => {
+      if (previous.user && state.user?.id !== previous.user.id) queryClient.clear();
+    });
+  }, [queryClient]);
+
+  useEffect(() => {
     // Trusted Types 受限 policy：只在支持该 API 的浏览器注册；不提供 HTML/脚本注入能力。
     installTrustedTypesPolicy();
     // 先取 CSRF 令牌，再探测会话；不阻塞首屏渲染（不再用全屏加载遮罩）。

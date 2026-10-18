@@ -15,11 +15,14 @@ import uuid
 from fastapi import APIRouter, Depends, Query, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.core.deps import get_current_user, get_db
+from app.core.deps import get_current_user, get_db, get_request_id
+from app.core.permissions import RESOURCE_REVIEW, require
+from app.core.errors import NotEnabled
 from app.core.pagination import CursorPage
 from app.modules.topics import service
 from app.modules.topics.schemas import (
     BaoyanExperienceCreate,
+    BaoyanReviewIn,
     BaoyanExperienceOut,
     BaoyanPolicyOut,
     CompetitionListOut,
@@ -34,6 +37,35 @@ from app.modules.topics.schemas import (
 )
 
 router = APIRouter(prefix="/topics", tags=["topics"])
+
+
+@router.get("/admin/baoyan/pending", response_model=list[BaoyanExperienceOut])
+async def pending_baoyan(
+    limit: int = Query(20, ge=1, le=50),
+    db: AsyncSession = Depends(get_db),
+    reviewer=Depends(require(RESOURCE_REVIEW)),
+):
+    return await service.pending_experiences(db, reviewer_id=reviewer.id, limit=limit)
+
+
+@router.post(
+    "/admin/baoyan/{experience_id}/decisions", response_model=BaoyanExperienceOut
+)
+async def review_baoyan(
+    experience_id: uuid.UUID,
+    payload: BaoyanReviewIn,
+    db: AsyncSession = Depends(get_db),
+    reviewer=Depends(require(RESOURCE_REVIEW)),
+    request_id: str = Depends(get_request_id),
+):
+    return await service.review_experience(
+        db,
+        reviewer=reviewer,
+        experience_id=experience_id,
+        approve=payload.approve,
+        reason=payload.reason,
+        request_id=request_id,
+    )
 
 
 # --------------------------------------------------------------------------- #
@@ -165,7 +197,16 @@ async def list_transfer_policies(
     )
 
 
-@router.get("/transfer/cases", response_model=CursorPage[TransferCaseOut])
+def _require_transfer_review_workflow() -> None:
+    # 界面仍为待评估：审核链建成前，不允许遗留接口直接投稿或公开用户内容。
+    raise NotEnabled("转专业案例审核流程尚未启用，暂不接受投稿或公开展示")
+
+
+@router.get(
+    "/transfer/cases",
+    response_model=CursorPage[TransferCaseOut],
+    dependencies=[Depends(_require_transfer_review_workflow)],
+)
 async def list_transfer_cases(
     limit: int | None = Query(None, ge=1, le=100),
     cursor: str | None = Query(None),
@@ -174,7 +215,12 @@ async def list_transfer_cases(
     return await service.list_transfer_cases(db, limit=limit, cursor=cursor)
 
 
-@router.post("/transfer/cases", response_model=TransferCaseOut, status_code=status.HTTP_201_CREATED)
+@router.post(
+    "/transfer/cases",
+    response_model=TransferCaseOut,
+    status_code=status.HTTP_201_CREATED,
+    dependencies=[Depends(_require_transfer_review_workflow)],
+)
 async def create_transfer_case(
     payload: TransferCaseCreate,
     user=Depends(get_current_user),

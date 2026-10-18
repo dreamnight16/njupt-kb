@@ -39,6 +39,7 @@ __all__ = [
     "AuthToken",
     "UserMFA",
     "EmailChangeRequest",
+    "CaptchaChallenge",
 ]
 
 
@@ -209,3 +210,22 @@ class EmailChangeRequest(Base, UUIDPrimaryKey, Timestamped):
     expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
     consumed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     cancelled_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
+
+class CaptchaChallenge(Base, UUIDPrimaryKey, Timestamped):
+    """图形验证码挑战（0.0.3 注册防刷）。
+
+    自建、可本地跑：服务端渲染 PNG，答案只存 SHA-256 摘要，一次性 + 短时效 + 按 IP 限流。
+    purpose 预留（当前仅 register）；attempts 记录错误次数，超限作废本条。
+    """
+
+    __tablename__ = "captcha_challenges"
+
+    purpose: Mapped[str] = mapped_column(
+        String(20), nullable=False, default="register", index=True
+    )
+    code_hash: Mapped[str] = mapped_column(String(64), nullable=False)
+    expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    consumed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    attempts: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    client_ip: Mapped[str | None] = mapped_column(String(64), nullable=True)

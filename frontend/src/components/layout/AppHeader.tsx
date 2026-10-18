@@ -46,6 +46,7 @@ export function AppHeader() {
   const menuOpen = menuPath === pathname;
   const setMenuOpen = (open: boolean) => setMenuPath(open ? pathname : null);
   const menuRef = useRef<HTMLDivElement>(null);
+  const menuButtonRef = useRef<HTMLButtonElement>(null);
 
   useEffect(() => {
     function onDocClick(event: MouseEvent) {
@@ -53,8 +54,18 @@ export function AppHeader() {
         setMenuPath(null);
       }
     }
+    function onKeyDown(event: KeyboardEvent) {
+      if (event.key === 'Escape' && menuRef.current?.contains(document.activeElement)) {
+        setMenuPath(null);
+        menuButtonRef.current?.focus();
+      }
+    }
     document.addEventListener('mousedown', onDocClick);
-    return () => document.removeEventListener('mousedown', onDocClick);
+    document.addEventListener('keydown', onKeyDown);
+    return () => {
+      document.removeEventListener('mousedown', onDocClick);
+      document.removeEventListener('keydown', onKeyDown);
+    };
   }, []);
 
   const authed = status === 'authenticated' && !!user;
@@ -115,6 +126,7 @@ export function AppHeader() {
               <NotificationBell />
               <div className="relative" ref={menuRef}>
                 <button
+                  ref={menuButtonRef}
                   type="button"
                   onClick={() => setMenuOpen(!menuOpen)}
                   aria-expanded={menuOpen}
@@ -129,7 +141,7 @@ export function AppHeader() {
                 {menuOpen && (
                   <div
                     role="menu"
-                    className="absolute right-0 mt-1 w-60 border border-divider bg-surface py-1 shadow-3"
+                    className="dn-enter absolute right-0 mt-1 max-h-[calc(100dvh-9rem)] w-60 overflow-y-auto overscroll-contain border border-divider bg-surface py-1 shadow-3 md:max-h-[calc(100dvh-5rem)]"
                   >
                     <div className="border-b border-divider px-4 py-3">
                       <p className="text-sm font-medium text-text-primary">

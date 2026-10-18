@@ -10,11 +10,14 @@ from __future__ import annotations
 
 import uuid
 from datetime import datetime, timezone
+from typing import TYPE_CHECKING
 
 from sqlalchemy import and_, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.core.errors import InvalidInput, NotFound
+from app.core.errors import Conflict, Forbidden, InvalidInput, NotFound
+from app.core.audit import record_audit
+from app.modules.catalog.models import College, Major
 from app.core.pagination import CursorPage, decode_cursor, encode_cursor, normalize_page_size
 from app.modules.topics.models import (
     BaoyanExperience,
@@ -28,6 +31,9 @@ from app.modules.topics.models import (
     MajorTransferPolicy,
     ScrapedPage,
 )
+
+if TYPE_CHECKING:
+    from app.modules.identity.models import User
 from app.modules.topics.schemas import (
     BaoyanExperienceCreate,
     BaoyanExperienceOut,
@@ -159,6 +165,16 @@ async def list_experiences(
 async def create_experience(
     db: AsyncSession, *, user, payload: BaoyanExperienceCreate
 ) -> BaoyanExperienceOut:
+    major = await db.get(Major, payload.major_id)
+    college = await db.get(College, payload.college_id)
+    if (
+        major is None
+        or college is None
+        or major.college_id != college.id
+        or major.status != "active"
+        or college.status != "active"
+    ):
+        raise InvalidInput("请选择同一学院下的有效专业")
     experience = BaoyanExperience(
         author_id=user.id,
         college_id=payload.college_id,
@@ -177,7 +193,7 @@ async def create_experience(
         advice=payload.advice,
         year=payload.year,
         tags=payload.tags,
-        status="active",
+        status="pending",
     )
     db.add(experience)
     await db.flush()
@@ -185,15 +201,88 @@ async def create_experience(
     return BaoyanExperienceOut.model_validate(experience)
 
 
-async def get_experience(db: AsyncSession, *, experience_id: uuid.UUID) -> BaoyanExperienceOut:
+async def get_experience(
+    db: AsyncSession, *, experience_id: uuid.UUID
+) -> BaoyanExperienceOut:
     experience = (
-        await db.execute(select(BaoyanExperience).where(BaoyanExperience.id == experience_id))
+        await db.execute(
+            select(BaoyanExperience).where(
+                BaoyanExperience.id == experience_id,
+                BaoyanExperience.status == "active",
+            )
+        )
     ).scalar_one_or_none()
     if experience is None:
         raise NotFound("保研经验不存在")
     experience.view_count += 1
     await db.flush()
     return BaoyanExperienceOut.model_validate(experience)
+
+
+async def pending_experiences(
+    db: AsyncSession, *, reviewer_id: uuid.UUID, limit: int = 20
+) -> list[BaoyanExperienceOut]:
+    rows = await db.scalars(
+        select(BaoyanExperience)
+        .where(
+            BaoyanExperience.status == "pending",
+            BaoyanExperience.author_id != reviewer_id,
+        )
+        .order_by(BaoyanExperience.created_at, BaoyanExperience.id)
+        .limit(limit)
+    )
+    return [BaoyanExperienceOut.model_validate(row) for row in rows]
+
+
+async def review_experience(
+    db: AsyncSession,
+    *,
+    reviewer: User,
+    experience_id: uuid.UUID,
+    approve: bool,
+    reason: str,
+    request_id: str,
+) -> BaoyanExperienceOut:
+    reason = reason.strip()
+    if not reason or len(reason) > 500:
+        raise InvalidInput("审核理由须为 1–500 字")
+    row = await db.scalar(
+        select(BaoyanExperience)
+        .where(BaoyanExperience.id == experience_id)
+        .with_for_update()
+        .execution_options(populate_existing=True)
+    )
+    if row is None:
+        raise NotFound("保研经验不存在")
+    if row.author_id == reviewer.id:
+        raise Forbidden("不能审核自己的经验帖")
+    if row.status != "pending":
+        raise Conflict("该经验帖已处理，请刷新队列")
+    row.status = "active" if approve else "rejected"
+    await record_audit(
+        db,
+        action="baoyan_experience.reviewed",
+        object_type="baoyan_experience",
+        object_id=row.id,
+        actor_id=reviewer.id,
+        before={"status": "pending"},
+        after={"status": row.status},
+        reason=reason,
+        request_id=request_id,
+    )
+    from app.core.enums import NotificationType
+    from app.modules.notification.service import notify
+
+    await notify(
+        db,
+        user_id=row.author_id,
+        type=NotificationType.REVIEW_RESULT,
+        title="保研经验审核通过" if approve else "保研经验未通过审核",
+        body=reason,
+        data={"experience_id": str(row.id), "status": row.status},
+    )
+    await db.flush()
+    return BaoyanExperienceOut.model_validate(row)
 
 
 # --------------------------------------------------------------------------- #

@@ -12,7 +12,7 @@ export const dynamic = 'force-dynamic';
 export async function generateMetadata({ params }: { params: Promise<{ id: string }> }): Promise<Metadata> {
   const { id } = await params;
   if (!isUuid(id)) return { title: '保研经验' };
-  const result = await serverFetch<BaoyanExperience>(`/baoyan/experiences/${id}`);
+  const result = await serverFetch<BaoyanExperience>(`/topics/baoyan/experiences/${id}`);
   return { title: result.data ? `${result.data.target_university} 保研经验` : '保研经验' };
 }
 
@@ -24,7 +24,7 @@ function text(value: unknown): string | null {
 export default async function BaoyanExperiencePage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
   if (!isUuid(id)) notFound();
-  const result = await serverFetch<BaoyanExperience>(`/baoyan/experiences/${id}`);
+  const result = await serverFetch<BaoyanExperience>(`/topics/baoyan/experiences/${id}`);
   if (result.error?.status === 404) notFound();
   const item = result.data;
   if (!item) return <Notice tone="warning" title="经验帖暂时无法加载">{result.error?.message ?? '请稍后重试。'}</Notice>;
@@ -72,12 +72,9 @@ export default async function BaoyanExperiencePage({ params }: { params: Promise
       )}
 
       {sections.every((section) => !section.body) && (
-        <Notice tone="info" title="正文尚未填写">该经验帖只有基本信息，没有可阅读的经历描述。</Notice>
+        <Notice tone="info" title="正文尚未填写" />
       )}
 
-      <Notice tone="warning" title="请注意时效">
-        招生政策、考核形式与名额每年可能变化。经验帖只代表作者当年的个人经历，不能替代当年官方文件。
-      </Notice>
     </article>
   );
 }

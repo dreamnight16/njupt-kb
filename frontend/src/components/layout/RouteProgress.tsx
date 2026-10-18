@@ -1,7 +1,7 @@
 'use client';
 
-import { useEffect, useRef, useState } from 'react';
-import { usePathname } from 'next/navigation';
+import { useEffect, useState } from 'react';
+import { usePathname, useSearchParams } from 'next/navigation';
 
 /**
  * 路由切换进度条：点击站内链接立即给出反馈，路径变化后收尾。
@@ -9,8 +9,9 @@ import { usePathname } from 'next/navigation';
  */
 export function RouteProgress() {
   const pathname = usePathname();
-  const [active, setActive] = useState(false);
-  const startedAt = useRef(0);
+  const searchParams = useSearchParams();
+  const route = pathname + (searchParams.size ? `?${searchParams}` : '');
+  const [navigation, setNavigation] = useState<{ from: string; startedAt: number } | null>(null);
 
   useEffect(() => {
     function onClick(event: MouseEvent) {
@@ -32,8 +33,7 @@ export function RouteProgress() {
       const url = new URL(anchor.href, window.location.href);
       if (url.origin !== window.location.origin) return;
       if (url.pathname === window.location.pathname && url.search === window.location.search) return;
-      startedAt.current = Date.now();
-      setActive(true);
+      setNavigation({ from: window.location.pathname + window.location.search, startedAt: Date.now() });
     }
 
     document.addEventListener('click', onClick, true);
@@ -41,14 +41,16 @@ export function RouteProgress() {
   }, []);
 
   useEffect(() => {
-    if (!active) return;
-    // 最短展示 240ms：闪烁一下就消失的进度条只会造成干扰。
-    const wait = Math.max(0, 240 - (Date.now() - startedAt.current));
-    const timer = window.setTimeout(() => setActive(false), wait);
+    if (!navigation) return;
+    // URL 提交后才结束；导航失败或取消时最多等待 15 秒。
+    const wait = route === navigation.from
+      ? Math.max(0, 15_000 - (Date.now() - navigation.startedAt))
+      : Math.max(0, 240 - (Date.now() - navigation.startedAt));
+    const timer = window.setTimeout(() => setNavigation(null), wait);
     return () => window.clearTimeout(timer);
-  }, [active, pathname]);
+  }, [navigation, route]);
 
-  if (!active) return null;
+  if (!navigation) return null;
 
   return (
     <div

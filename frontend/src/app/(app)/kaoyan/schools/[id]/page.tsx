@@ -13,7 +13,7 @@ export const dynamic = 'force-dynamic';
 export async function generateMetadata({ params }: { params: Promise<{ id: string }> }): Promise<Metadata> {
   const { id } = await params;
   if (!isUuid(id)) return { title: '考研院校' };
-  const result = await serverFetch<CursorPage<KaoyanSchool>>('/kaoyan/schools?limit=100');
+  const result = await serverFetch<CursorPage<KaoyanSchool>>('/topics/kaoyan/schools?limit=100');
   const school = result.data?.items.find((item) => item.id === id);
   return { title: school ? `${school.name} 考研` : '考研院校' };
 }
@@ -23,9 +23,9 @@ export default async function KaoyanSchoolPage({ params }: { params: Promise<{ i
   if (!isUuid(id)) notFound();
 
   const [schoolsResult, majorsResult, linesResult] = await Promise.all([
-    serverFetch<CursorPage<KaoyanSchool>>('/kaoyan/schools?limit=100'),
-    serverFetch<CursorPage<KaoyanMajor>>(`/kaoyan/schools/${id}/majors?limit=50`),
-    serverFetch<CursorPage<KaoyanScoreLine>>(`/kaoyan/score-lines?school_id=${id}&limit=50`),
+    serverFetch<CursorPage<KaoyanSchool>>('/topics/kaoyan/schools?limit=100'),
+    serverFetch<CursorPage<KaoyanMajor>>(`/topics/kaoyan/schools/${id}/majors?limit=50`),
+    serverFetch<CursorPage<KaoyanScoreLine>>(`/topics/kaoyan/score-lines?school_id=${id}&limit=50`),
   ]);
 
   const school = schoolsResult.data?.items.find((item) => item.id === id);
@@ -55,7 +55,7 @@ export default async function KaoyanSchoolPage({ params }: { params: Promise<{ i
         {majorsResult.error ? (
           <Notice tone="warning" title="专业暂时无法加载">{majorsResult.error.message}</Notice>
         ) : majors.length === 0 ? (
-          <Notice tone="info" title="还没有专业记录">该院校的专业与考试科目尚未录入。</Notice>
+          <Notice tone="info" title="还没有专业记录" />
         ) : (
           <ul className="divide-y divide-divider border border-divider bg-surface">
             {majors.map((major) => (
@@ -79,7 +79,7 @@ export default async function KaoyanSchoolPage({ params }: { params: Promise<{ i
       <section aria-labelledby="kaoyan-lines" className="space-y-3">
         <h2 id="kaoyan-lines" className="text-xl font-semibold">历年分数线</h2>
         {lines.length === 0 ? (
-          <Notice tone="info" title="还没有分数线记录">分数线需要按年份与专业录入，并标注来源。</Notice>
+          <Notice tone="info" title="还没有分数线记录" />
         ) : (
           <div className="overflow-x-auto border border-divider bg-surface">
             <table className="w-full border-collapse text-sm">
@@ -136,9 +136,6 @@ export default async function KaoyanSchoolPage({ params }: { params: Promise<{ i
         )}
       </section>
 
-      <Notice tone="info" title="使用边界">
-        分数线是历史记录，不构成对下一年度的预测。来源未标注的记录请谨慎参考。
-      </Notice>
     </div>
   );
 }

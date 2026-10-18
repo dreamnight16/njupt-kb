@@ -233,8 +233,8 @@ class Beta12DatabaseTests(unittest.IsolatedAsyncioTestCase):
         async def withdrawn_during_generation(*args, **kwargs):
             self.resource.publication_status = "withdrawn"
             await self.db.flush()
-            return None
-        with patch.object(content, "ensure_watermarked_preview", withdrawn_during_generation), patch.object(access.storage, "presign_download", AsyncMock()) as sign:
+            return []
+        with patch.object(content, "ensure_watermarked_preview_pages", withdrawn_during_generation), patch.object(access.storage, "presign_preview_download", AsyncMock()) as sign:
             with self.assertRaises(NotFound):
                 await access.issue_preview_grant(self.db, user=self.other, resource_id=self.resource.id,
                     version_id=self.version.id, request_id="beta12")

@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useState } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { useMutation, useQuery } from '@tanstack/react-query';
@@ -28,16 +28,11 @@ export default function BaoyanSubmitPage() {
   });
 
   const colleges = useQuery({ queryKey: ['colleges'], queryFn: listColleges });
-  const majors = useQuery({ queryKey: ['majors'], queryFn: listMajors });
-
-  useEffect(() => {
-    // 学院变化后清空不再属于该学院的专业，避免提交错配。
-    setMajorId('');
-  }, [collegeId]);
-
-  const filteredMajors = (majors.data ?? []).filter(
-    (item) => !collegeId || !item.college_id || item.college_id === collegeId,
-  );
+  const majors = useQuery({
+    queryKey: ['majors', collegeId],
+    queryFn: () => listMajors(collegeId || undefined),
+    enabled: !!collegeId,
+  });
 
   const mutation = useMutation({
     mutationFn: () =>
@@ -80,7 +75,7 @@ export default function BaoyanSubmitPage() {
         <Link href="/baoyan" className="text-sm text-brand underline underline-offset-2">返回保研专题</Link>
         <h1 className="dn-display mt-4 text-3xl">分享保研经验</h1>
         <p className="mt-3 text-text-secondary">
-          写清楚时间线、考核形式与自己的准备过程，比只写结论更有帮助。提交后进入审核，通过后公开。
+          审核通过后公开。
         </p>
       </header>
 
@@ -94,7 +89,10 @@ export default function BaoyanSubmitPage() {
           <select
             id="college"
             value={collegeId}
-            onChange={(event) => setCollegeId(event.target.value)}
+            onChange={(event) => {
+              setCollegeId(event.target.value);
+              setMajorId('');
+            }}
             className="mt-1 min-h-11 w-full border border-control-border bg-surface px-3 text-sm"
           >
             <option value="">请选择学院</option>
@@ -113,7 +111,7 @@ export default function BaoyanSubmitPage() {
             disabled={!collegeId}
           >
             <option value="">{collegeId ? '请选择专业' : '请先选择学院'}</option>
-            {filteredMajors.map((item) => (
+            {(majors.data ?? []).map((item) => (
               <option key={item.id} value={item.id}>{item.name}</option>
             ))}
           </select>

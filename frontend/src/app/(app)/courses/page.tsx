@@ -6,7 +6,8 @@ import { Notice } from '@/components/common/Notice';
 import type { CollegeBrief, CourseListItem, MajorBrief } from '@/lib/api/catalog';
 import { serverFetch } from '@/lib/api/server';
 import type { CursorPage } from '@/lib/api/types';
-import { isUuid } from '@/lib/utils';
+import { firstSearchParam, isUuid } from '@/lib/utils';
+import CoursesFilterForm from './CoursesFilterForm';
 
 export const metadata: Metadata = {
   title: '课程',
@@ -17,10 +18,10 @@ export const metadata: Metadata = {
 export const dynamic = 'force-dynamic';
 
 interface CoursesSearchParams {
-  q?: string;
-  college_id?: string;
-  major_id?: string;
-  cursor?: string;
+  q?: string | string[];
+  college_id?: string | string[];
+  major_id?: string | string[];
+  cursor?: string | string[];
 }
 
 function buildQuery(params: Record<string, string | undefined>): string {
@@ -38,10 +39,12 @@ export default async function CoursesPage({
   searchParams: Promise<CoursesSearchParams>;
 }) {
   const params = await searchParams;
-  const keyword = params.q?.trim() || '';
-  const collegeId = isUuid(params.college_id) ? params.college_id : '';
-  const majorId = isUuid(params.major_id) ? params.major_id : '';
-  const cursor = params.cursor || '';
+  const keyword = firstSearchParam(params.q)?.trim() || '';
+  const rawCollegeId = firstSearchParam(params.college_id);
+  const rawMajorId = firstSearchParam(params.major_id);
+  const collegeId = isUuid(rawCollegeId) ? rawCollegeId : '';
+  const majorId = isUuid(rawMajorId) ? rawMajorId : '';
+  const cursor = firstSearchParam(params.cursor) || '';
 
   const query = buildQuery({
     q: keyword || undefined,
@@ -73,78 +76,19 @@ export default async function CoursesPage({
         </p>
       </header>
 
-      {/* 原生 GET 表单：不依赖 JS 即可完成筛选与提交（§39 A20 键盘可达）。 */}
-      <form method="get" className="grid gap-3 border border-divider bg-surface p-4 md:grid-cols-[1fr_auto_auto_auto]">
-        <div>
-          <label htmlFor="course-q" className="mb-1 block text-sm font-medium text-text-primary">
-            课程名 / 代码 / 简称
-          </label>
-          <input
-            id="course-q"
-            name="q"
-            type="search"
-            defaultValue={keyword}
-            placeholder="例如：数据结构、B0300010、数构"
-            className="min-h-11 w-full border border-control-border bg-surface px-3 text-sm text-text-primary placeholder:text-text-secondary focus:border-brand focus:outline-2 focus:outline-offset-1 focus:outline-focus"
-          />
-        </div>
-        <div>
-          <label htmlFor="course-college" className="mb-1 block text-sm font-medium text-text-primary">
-            学院
-          </label>
-          <select
-            id="course-college"
-            name="college_id"
-            defaultValue={collegeId}
-            className="min-h-11 w-full border border-control-border bg-surface px-3 text-sm text-text-primary focus:border-brand focus:outline-2 focus:outline-offset-1 focus:outline-focus"
-          >
-            <option value="">全部学院</option>
-            {colleges.map((college) => (
-              <option key={college.id} value={college.id}>
-                {college.name}
-              </option>
-            ))}
-          </select>
-        </div>
-        <div>
-          <label htmlFor="course-major" className="mb-1 block text-sm font-medium text-text-primary">
-            专业
-          </label>
-          <select
-            id="course-major"
-            name="major_id"
-            defaultValue={majorId}
-            className="min-h-11 w-full border border-control-border bg-surface px-3 text-sm text-text-primary focus:border-brand focus:outline-2 focus:outline-offset-1 focus:outline-focus"
-          >
-            <option value="">全部专业</option>
-            {majors.map((major) => (
-              <option key={major.id} value={major.id}>
-                {major.college_name} · {major.name}
-              </option>
-            ))}
-          </select>
-        </div>
-        <div className="flex items-end gap-2">
-          <button
-            type="submit"
-            className="inline-flex min-h-11 items-center bg-brand px-4 text-sm font-medium text-on-color hover:bg-brand/90"
-          >
-            筛选
-          </button>
-          {hasFilters && (
-            <Link
-              href="/courses"
-              className="inline-flex min-h-11 items-center border border-control-border px-4 text-sm font-medium text-text-primary hover:bg-canvas"
-            >
-              清除
-            </Link>
-          )}
-        </div>
-      </form>
+      <CoursesFilterForm
+        key={JSON.stringify([keyword, collegeId, majorId, cursor])}
+        colleges={colleges}
+        majors={majors}
+        keyword={keyword}
+        collegeId={collegeId}
+        majorId={majorId}
+        hasFilters={hasFilters}
+      />
 
-      {collegesResult.error && (
+      {(collegesResult.error || majorsResult.error) && (
         <Notice tone="info" title="学院与专业筛选项暂时不可用">
-          仍可按关键词搜索课程。{collegesResult.error.message}
+          仍可按关键词搜索课程。{collegesResult.error?.message || majorsResult.error?.message}
         </Notice>
       )}
 

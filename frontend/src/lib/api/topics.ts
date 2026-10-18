@@ -133,7 +133,7 @@ export async function listBaoyanPolicies(params?: {
   year?: number;
   limit?: number;
 }): Promise<CursorPage<BaoyanPolicy>> {
-  const { data } = await api.get<CursorPage<BaoyanPolicy>>('/baoyan/policies', {
+  const { data } = await api.get<CursorPage<BaoyanPolicy>>('/topics/baoyan/policies', {
     params: { limit: 20, ...params },
   });
   return data;
@@ -145,14 +145,14 @@ export async function listBaoyanExperiences(params?: {
   year?: number;
   limit?: number;
 }): Promise<CursorPage<BaoyanExperience>> {
-  const { data } = await api.get<CursorPage<BaoyanExperience>>('/baoyan/experiences', {
+  const { data } = await api.get<CursorPage<BaoyanExperience>>('/topics/baoyan/experiences', {
     params: { limit: 12, ...params },
   });
   return data;
 }
 
 export async function getBaoyanExperience(id: string): Promise<BaoyanExperience> {
-  const { data } = await api.get<BaoyanExperience>(`/baoyan/experiences/${id}`);
+  const { data } = await api.get<BaoyanExperience>(`/topics/baoyan/experiences/${id}`);
   return data;
 }
 
@@ -171,7 +171,7 @@ export async function createBaoyanExperience(input: {
   advice?: string;
   year: number;
 }): Promise<BaoyanExperience> {
-  const { data } = await api.post<BaoyanExperience>('/baoyan/experiences', input);
+  const { data } = await api.post<BaoyanExperience>('/topics/baoyan/experiences', input);
   return data;
 }
 
@@ -179,19 +179,19 @@ export async function listCompetitions(params?: {
   category?: string;
   limit?: number;
 }): Promise<CursorPage<Competition>> {
-  const { data } = await api.get<CursorPage<Competition>>('/competitions', {
+  const { data } = await api.get<CursorPage<Competition>>('/topics/competitions', {
     params: { limit: 24, ...params },
   });
   return data;
 }
 
 export async function getCompetition(id: string): Promise<Competition> {
-  const { data } = await api.get<Competition>(`/competitions/${id}`);
+  const { data } = await api.get<Competition>(`/topics/competitions/${id}`);
   return data;
 }
 
 export async function listKaoyanSchools(limit = 30): Promise<CursorPage<KaoyanSchool>> {
-  const { data } = await api.get<CursorPage<KaoyanSchool>>('/kaoyan/schools', {
+  const { data } = await api.get<CursorPage<KaoyanSchool>>('/topics/kaoyan/schools', {
     params: { limit },
   });
   return data;
@@ -199,7 +199,7 @@ export async function listKaoyanSchools(limit = 30): Promise<CursorPage<KaoyanSc
 
 export async function listKaoyanMajors(schoolId: string): Promise<CursorPage<KaoyanMajor>> {
   const { data } = await api.get<CursorPage<KaoyanMajor>>(
-    `/kaoyan/schools/${schoolId}/majors`,
+    `/topics/kaoyan/schools/${schoolId}/majors`,
     { params: { limit: 50 } },
   );
   return data;
@@ -210,7 +210,7 @@ export async function listKaoyanScoreLines(params: {
   major_id?: string;
   year?: number;
 }): Promise<CursorPage<KaoyanScoreLine>> {
-  const { data } = await api.get<CursorPage<KaoyanScoreLine>>('/kaoyan/score-lines', {
+  const { data } = await api.get<CursorPage<KaoyanScoreLine>>('/topics/kaoyan/score-lines', {
     params: { limit: 50, ...params },
   });
   return data;
@@ -221,7 +221,19 @@ export async function listColleges(): Promise<CollegeBrief[]> {
   return data;
 }
 
-export async function listMajors(): Promise<MajorBrief[]> {
-  const { data } = await api.get<MajorBrief[]>('/majors');
+export async function listMajors(collegeId?: string): Promise<MajorBrief[]> {
+  const { data } = await api.get<MajorBrief[]>('/majors', {
+    params: { college_id: collegeId || undefined },
+  });
+  return data;
+}
+
+export async function listPendingExperiences(): Promise<BaoyanExperience[]> {
+  const { data } = await api.get<BaoyanExperience[]>('/topics/admin/baoyan/pending');
+  return data;
+}
+
+export async function reviewExperience(id: string, approve: boolean, reason: string): Promise<BaoyanExperience> {
+  const { data } = await api.post<BaoyanExperience>(`/topics/admin/baoyan/${id}/decisions`, { approve, reason });
   return data;
 }

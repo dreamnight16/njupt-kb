@@ -31,7 +31,6 @@ from sqlalchemy import delete, func as sa_func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import settings
-from app.core.enums import Role
 from app.core.errors import InvalidInput, NotFound
 from app.modules.reco.models import (
     BehaviorConsent,
@@ -175,7 +174,6 @@ async def record_events(
 
     now = _now()
     window_start = now - timedelta(hours=1)
-    key = f"behavior:{user.id}" if user is not None else f"behavior:{session_key or 'anon'}"
     recent = int(
         (
             await db.execute(

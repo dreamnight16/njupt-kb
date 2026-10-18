@@ -7,10 +7,11 @@ export function CourseCard({ course }: { course: CourseListItem }) {
   return (
     <Link
       href={`/courses/${course.id}`}
-      className="block border border-divider bg-surface p-4 transition-shadow duration-200 hover:shadow-2"
+      prefetch={false}
+      className="dn-interactive block border border-divider bg-surface p-4 hover:border-brand"
     >
-      <div className="flex items-start justify-between gap-3">
-        <h3 className="font-semibold text-text-primary">{course.name}</h3>
+      <div className="flex flex-wrap items-start justify-between gap-3">
+        <h3 className="min-w-0 break-words font-semibold text-text-primary">{course.name}</h3>
         {course.code && (
           <span className="shrink-0 bg-steel px-2 py-0.5 text-xs font-semibold text-on-color">
             {course.code}

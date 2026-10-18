@@ -12,8 +12,8 @@ export const dynamic = 'force-dynamic';
 
 export default async function BaoyanPage() {
   const [policiesResult, experiencesResult, collegesResult] = await Promise.all([
-    serverFetch<CursorPage<BaoyanPolicy>>('/baoyan/policies?limit=20'),
-    serverFetch<CursorPage<BaoyanExperience>>('/baoyan/experiences?limit=12'),
+    serverFetch<CursorPage<BaoyanPolicy>>('/topics/baoyan/policies?limit=20'),
+    serverFetch<CursorPage<BaoyanExperience>>('/topics/baoyan/experiences?limit=12'),
     serverFetch<CollegeBrief[]>('/colleges'),
   ]);
 
@@ -26,10 +26,6 @@ export default async function BaoyanPage() {
       <header className="border-b border-divider pb-6">
         <p className="text-sm text-text-secondary">推免 / 保研</p>
         <h1 className="dn-display mt-2 text-3xl">保研专题</h1>
-        <p className="mt-3 max-w-3xl text-text-secondary">
-          政策按学院与年份记录，经验帖按目标院校与结果记录。政策是否适用于你，取决于当年文件与学院口径，
-          请以来源链接的原文为准；经验帖是个人经历，不是录取承诺。
-        </p>
         <div className="mt-4 flex flex-wrap gap-2">
           <Link href="/baoyan/submit" className="inline-flex min-h-11 items-center bg-brand px-4 text-sm font-medium text-on-color">
             分享保研经验
@@ -43,12 +39,11 @@ export default async function BaoyanPage() {
       <section aria-labelledby="baoyan-policies" className="space-y-3">
         <div className="flex flex-wrap items-baseline justify-between gap-2">
           <h2 id="baoyan-policies" className="text-xl font-semibold">政策与名额</h2>
-          <p className="text-xs text-text-secondary">按记录时间倒序；未标注来源的政策不作结论</p>
         </div>
         {policiesResult.error ? (
           <Notice tone="warning" title="政策暂时无法加载">{policiesResult.error.message}</Notice>
         ) : policies.length === 0 ? (
-          <Notice tone="info" title="还没有政策记录">政策数据需要管理员按学院与年份录入并标注来源。</Notice>
+          <Notice tone="info" title="还没有政策记录" />
         ) : (
           <ul className="divide-y divide-divider border border-divider bg-surface">
             {policies.map((policy) => (
@@ -104,12 +99,11 @@ export default async function BaoyanPage() {
       <section aria-labelledby="baoyan-experiences" className="space-y-3">
         <div className="flex flex-wrap items-baseline justify-between gap-2">
           <h2 id="baoyan-experiences" className="text-xl font-semibold">经验帖</h2>
-          <p className="text-xs text-text-secondary">作者自述，未经平台事实核验</p>
         </div>
         {experiencesResult.error ? (
           <Notice tone="warning" title="经验帖暂时无法加载">{experiencesResult.error.message}</Notice>
         ) : experiences.length === 0 ? (
-          <Notice tone="info" title="还没有经验帖">成为第一个分享的人：说明目标院校、时间线与面试形式，比结论更有用。</Notice>
+          <Notice tone="info" title="还没有经验帖" />
         ) : (
           <ul className="grid gap-4 sm:grid-cols-2">
             {experiences.map((item) => (
@@ -131,9 +125,6 @@ export default async function BaoyanPage() {
         )}
       </section>
 
-      <Notice tone="info" title="使用边界">
-        平台不提供保研资格认定或录取预测。政策条目缺失、年份不符或来源未核对时，请直接联系学院教务确认。
-      </Notice>
     </div>
   );
 }

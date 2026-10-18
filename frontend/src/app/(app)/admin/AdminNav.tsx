@@ -6,6 +6,7 @@ import { hasPermission, isAdmin, useAuthStore } from '@/stores/authStore';
 export const adminItems = [
   { href: '/admin/workbench', label: '工作台', permission: 'ops.view' },
   { href: '/admin/reviews', label: '审核队列', permission: 'resource.review' },
+  { href: '/admin/baoyan', label: '保研经验审核', permission: 'resource.review' },
   { href: '/admin/publications', label: '发布队列', permission: 'resource.publish' },
   { href: '/admin/reports', label: '投诉工单', permission: 'report.handle' },
   { href: '/admin/corrections', label: '纠错工单', permission: 'correction.handle' },

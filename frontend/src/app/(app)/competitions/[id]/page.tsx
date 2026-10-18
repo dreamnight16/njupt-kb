@@ -12,7 +12,7 @@ export const dynamic = 'force-dynamic';
 export async function generateMetadata({ params }: { params: Promise<{ id: string }> }): Promise<Metadata> {
   const { id } = await params;
   if (!isUuid(id)) return { title: '竞赛详情' };
-  const result = await serverFetch<Competition>(`/competitions/${id}`);
+  const result = await serverFetch<Competition>(`/topics/competitions/${id}`);
   return { title: result.data?.name ?? '竞赛详情' };
 }
 
@@ -29,7 +29,7 @@ function listText(value: unknown): string {
 export default async function CompetitionDetailPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
   if (!isUuid(id)) notFound();
-  const result = await serverFetch<Competition>(`/competitions/${id}`);
+  const result = await serverFetch<Competition>(`/topics/competitions/${id}`);
   if (result.error?.status === 404) notFound();
   const item = result.data;
   if (!item) return <Notice tone="warning" title="竞赛暂时无法加载">{result.error?.message ?? '请稍后重试。'}</Notice>;
@@ -87,7 +87,7 @@ export default async function CompetitionDetailPage({ params }: { params: Promis
       <section aria-labelledby="competition-winners" className="space-y-3">
         <h2 id="competition-winners" className="text-xl font-semibold">本校获奖记录</h2>
         {winners.length === 0 ? (
-          <Notice tone="info" title="还没有获奖记录">获奖信息需要按年份与奖项录入并核对。</Notice>
+          <Notice tone="info" title="还没有获奖记录" />
         ) : (
           <ul className="divide-y divide-divider border border-divider bg-surface">
             {winners.map((winner) => (
@@ -109,9 +109,7 @@ export default async function CompetitionDetailPage({ params }: { params: Promis
         )}
       </section>
 
-      <Notice tone="info" title="使用边界">
-        报名条件、赛程与获奖认定以主办方和学校通知为准；本站整理可能滞后。
-      </Notice>
+      <p className="text-xs text-text-secondary">报名条件与赛程以官方通知为准。</p>
     </div>
   );
 }

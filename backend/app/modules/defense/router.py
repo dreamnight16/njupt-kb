@@ -25,7 +25,6 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import settings
 from app.core.deps import (
-    get_current_user,
     get_db,
     get_optional_user,
     get_request_id,

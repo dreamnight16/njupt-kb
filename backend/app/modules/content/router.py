@@ -17,6 +17,7 @@ from app.core.idempotency import lookup, normalize_key, remember
 from app.core.permissions import CATALOG_MANAGE, RESOURCE_REVISE, RESOURCE_SUBMIT, require
 from app.modules.content.classification import ClassificationIn, classify
 from app.modules.content import service
+from app.modules.content.management_router import router as management_router
 from app.modules.content.schemas import (
     PublicationOut,
     ResourceCreate,
@@ -37,7 +38,6 @@ from app.modules.ratelimit.deps import rate_limit
 
 router = APIRouter(tags=["content"])
 
-from app.modules.content.management_router import router as management_router
 router.include_router(management_router)
 
 

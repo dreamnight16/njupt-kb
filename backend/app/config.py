@@ -301,6 +301,15 @@ class Settings(BaseSettings):
 
     # --- 阶段开关（§6）：关闭时接口必须显式不可用，不返回假成功（§25.2）---
     COMMERCE_ENABLED: bool = False
+    # --- 0.0.3 注册图形验证码（自建、可本地跑，§13 防刷）---
+    # 服务端经 PIL 渲染 PNG，答案只存 SHA-256 摘要；一次性 + 短时效 + 按 IP 限流。
+    # CAPTCHA_ENABLED=false 时注册跳过校验（仅用于本地/测试，生产应保持开启）。
+    CAPTCHA_ENABLED: bool = True
+    CAPTCHA_TTL_SECONDS: int = 300
+    CAPTCHA_LENGTH: int = 4
+    CAPTCHA_MAX_ATTEMPTS: int = 5
+    CAPTCHA_RATE_LIMIT_PER_HOUR: int = 60
+    CAPTCHA_VERIFY_LIMIT_PER_HOUR: int = 120
     AI_ENABLED: bool = False
     AI_BASE_URL: str = ""
     AI_API_KEY: str = ""

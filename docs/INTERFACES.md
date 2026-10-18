@@ -1,6 +1,16 @@
 # 跨模块接口声明
 
-## 0.0.2 当前增补
+## 0.0.5 当前增补
+
+- 保研、考研、竞赛前端统一使用既有 `/api/v1/topics/*` API，网页路径保持 `/baoyan`、`/kaoyan`、`/competitions`。
+- `POST /topics/baoyan/experiences` 校验有效学院/专业归属，返回 `status=pending`；公开列表与详情只返回 `active`。
+- `GET /topics/admin/baoyan/pending?limit=20`：要求 `resource.review`，返回最早待审投稿数组，排除当前审核员本人；`limit` 为 1–50，处理后重新查询下一批。
+- `POST /topics/admin/baoyan/{id}/decisions`：要求 `resource.review`，请求 `{approve: boolean, reason: string}`，理由去空格后 1–500 字；禁止自审，重复处理返回冲突。通过置 `active`，拒绝置 `rejected`，同事务追加审计与作者通知。
+- `GET/POST /topics/transfer/cases`：审核链未启用前返回 `503 FEATURE_NOT_ENABLED`；写请求仍先经过 CSRF 校验。历史服务与数据保留。
+
+以下为历史阶段契约；同名行为以上述 0.0.5 增补为准。
+
+## 0.0.2 增补
 
 此前 beta16 及更早章节为阶段契约；以下变更优先，完整边界见 `RELEASE_0.0.2.md`。
 

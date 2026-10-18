@@ -15,7 +15,6 @@
 """
 
 import unittest
-import uuid
 from datetime import datetime, timedelta, timezone
 from unittest.mock import patch
 
@@ -32,7 +31,7 @@ from app.core.errors import InvalidInput
 from app.core.security import hash_password, token_digest
 from app.db import Base, get_db
 from app.modules.defense import service
-from app.modules.defense.models import DefenseEvent, DefensePolicy, Honeytoken, RiskSubject
+from app.modules.defense.models import DefenseEvent, RiskSubject
 from app.modules.identity.models import User
 from app.modules.ratelimit import service as ratelimit
 
