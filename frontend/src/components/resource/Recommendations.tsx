@@ -9,6 +9,7 @@ export async function Recommendations({ courseId }: { courseId?: string }) {
   );
   return (
     <section aria-label={courseId ? '课程推荐资料' : '推荐资料'}>
+      <p className="dn-kicker text-text-secondary">RECOMMENDED</p>
       <h2 className="dn-display text-2xl">{courseId ? '课程推荐资料' : '推荐资料'}</h2>
       <div className="mt-4">
         {result.error ? (
