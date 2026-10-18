@@ -63,6 +63,25 @@ export default async function HomePage() {
         ))}
       </nav>
 
+      <section aria-labelledby="study-topics">
+        <div className="mb-4">
+          <p className="dn-kicker text-text-secondary">NEXT STEP</p>
+          <h2 id="study-topics" className="dn-display text-2xl">升学与竞赛</h2>
+        </div>
+        <div className="grid gap-3 sm:grid-cols-3">
+          {[
+            ['/baoyan', '保研专题', '学院政策与同学的准备经验'],
+            ['/kaoyan', '考研专题', '备考规划与复习资料'],
+            ['/competitions', '竞赛专题', '竞赛信息与参赛攻略'],
+          ].map(([href, title, description]) => (
+            <Link key={href} href={href} className="dn-interactive border border-divider border-l-4 border-l-brand bg-surface p-4 hover:border-brand">
+              <h3 className="font-semibold text-text-primary">{title}<span aria-hidden="true" className="float-right text-brand">↗</span></h3>
+              <p className="mt-2 text-sm text-text-secondary">{description}</p>
+            </Link>
+          ))}
+        </div>
+      </section>
+
       <section aria-labelledby="recent-courses">
         <div className="mb-4 flex items-end justify-between gap-4">
           <div>

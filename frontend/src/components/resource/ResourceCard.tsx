@@ -38,11 +38,12 @@ export function ResourceCard({
   return (
     <Link
       href={`/resources/${resourceId}`}
-      className="flex gap-3 border border-divider bg-surface p-4 transition-shadow duration-200 hover:shadow-2"
+      prefetch={false}
+      className="dn-interactive flex gap-3 border border-divider bg-surface p-4 hover:border-brand"
     >
       <ResourceTypeIcon type={resourceType ?? 'other'} />
       <div className="min-w-0 flex-1">
-        <p className="truncate font-medium text-text-primary">{title}</p>
+        <p className="line-clamp-2 break-words font-medium text-text-primary" title={title}>{title}</p>
         <p className="mt-1 truncate text-xs text-text-secondary">
           {courseName ? (
             <>

@@ -42,6 +42,11 @@ class BaoyanPolicyOut(_TopicOut):
     created_at: datetime
 
 
+class BaoyanReviewIn(BaseModel):
+    approve: bool
+    reason: str = Field(min_length=1, max_length=500)
+
+
 class BaoyanExperienceCreate(BaseModel):
     college_id: uuid.UUID
     major_id: uuid.UUID

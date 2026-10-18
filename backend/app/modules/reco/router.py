@@ -15,7 +15,6 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import settings
 from app.core.deps import get_current_user, get_db, get_optional_user
-from app.core.enums import Role
 from app.core.errors import NotEnabled
 from app.core.permissions import RECO_MANAGE, require
 from app.modules.reco import service

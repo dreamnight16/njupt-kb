@@ -9,10 +9,9 @@ import unittest
 from datetime import datetime, timedelta, timezone
 from unittest.mock import patch
 
-from sqlalchemy import select
 
 from app.config import settings
-from app.core.errors import Conflict, Forbidden, InvalidInput, RateLimited
+from app.core.errors import Conflict, RateLimited
 from app.core.ratelimit import reset_rate_limit
 from app.modules.access import service as access_service
 from app.modules.access.models import PreviewGrant
@@ -22,7 +21,6 @@ from app.modules.identity.models import User
 from app.modules.interaction import service as interaction_service
 from app.modules.interaction.comment_management import manage_comment
 from app.modules.moderation import comment_reports
-from app.modules.moderation.models import AppealStatus, Report
 from app.modules.ops import service as ops_service
 
 import test_content_workflow as workflow

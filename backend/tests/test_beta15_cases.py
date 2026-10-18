@@ -19,7 +19,7 @@ from app.core.errors import Conflict, Forbidden, InvalidInput, NotFound, RateLim
 from app.core.ratelimit import reset_rate_limit
 from app.modules.access.models import AccessPolicy
 from app.modules.cases import service as cases
-from app.modules.cases.models import Case, CaseEvent, CaseMeasure, RightsNotice
+from app.modules.cases.models import Case, CaseEvent, RightsNotice
 from app.modules.cases.schemas import (
     CaseCreateIn,
     CaseEventIn,
@@ -27,7 +27,6 @@ from app.modules.cases.schemas import (
     MeasureCreateIn,
     RightsNoticeCreateIn,
 )
-from app.modules.content.models import Resource
 from app.modules.identity.models import User
 from app.modules.moderation.models import AuditLog
 from app.modules.notification.models import DomainEvent

@@ -13,7 +13,7 @@ export const dynamic = 'force-dynamic';
 export async function generateMetadata({ params }: { params: Promise<{ id: string }> }): Promise<Metadata> {
   const { id } = await params;
   if (!isUuid(id)) return { title: '考研院校' };
-  const result = await serverFetch<CursorPage<KaoyanSchool>>('/kaoyan/schools?limit=100');
+  const result = await serverFetch<CursorPage<KaoyanSchool>>('/topics/kaoyan/schools?limit=100');
   const school = result.data?.items.find((item) => item.id === id);
   return { title: school ? `${school.name} 考研` : '考研院校' };
 }
@@ -23,9 +23,9 @@ export default async function KaoyanSchoolPage({ params }: { params: Promise<{ i
   if (!isUuid(id)) notFound();
 
   const [schoolsResult, majorsResult, linesResult] = await Promise.all([
-    serverFetch<CursorPage<KaoyanSchool>>('/kaoyan/schools?limit=100'),
-    serverFetch<CursorPage<KaoyanMajor>>(`/kaoyan/schools/${id}/majors?limit=50`),
-    serverFetch<CursorPage<KaoyanScoreLine>>(`/kaoyan/score-lines?school_id=${id}&limit=50`),
+    serverFetch<CursorPage<KaoyanSchool>>('/topics/kaoyan/schools?limit=100'),
+    serverFetch<CursorPage<KaoyanMajor>>(`/topics/kaoyan/schools/${id}/majors?limit=50`),
+    serverFetch<CursorPage<KaoyanScoreLine>>(`/topics/kaoyan/score-lines?school_id=${id}&limit=50`),
   ]);
 
   const school = schoolsResult.data?.items.find((item) => item.id === id);

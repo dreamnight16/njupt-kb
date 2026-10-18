@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useState } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { useMutation, useQuery } from '@tanstack/react-query';
@@ -33,11 +33,6 @@ export default function BaoyanSubmitPage() {
     queryFn: () => listMajors(collegeId || undefined),
     enabled: !!collegeId,
   });
-
-  useEffect(() => {
-    // 学院变化后清空专业，避免提交错配。
-    setMajorId('');
-  }, [collegeId]);
 
   const mutation = useMutation({
     mutationFn: () =>
@@ -94,7 +89,10 @@ export default function BaoyanSubmitPage() {
           <select
             id="college"
             value={collegeId}
-            onChange={(event) => setCollegeId(event.target.value)}
+            onChange={(event) => {
+              setCollegeId(event.target.value);
+              setMajorId('');
+            }}
             className="mt-1 min-h-11 w-full border border-control-border bg-surface px-3 text-sm"
           >
             <option value="">请选择学院</option>

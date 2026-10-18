@@ -5,6 +5,7 @@ import { Notice } from '@/components/common/Notice';
 import { serverFetch } from '@/lib/api/server';
 import type { Competition } from '@/lib/api/topics';
 import type { CursorPage } from '@/lib/api/types';
+import { firstSearchParam } from '@/lib/utils';
 
 export const metadata: Metadata = { title: '竞赛专题' };
 export const dynamic = 'force-dynamic';
@@ -12,11 +13,11 @@ export const dynamic = 'force-dynamic';
 export default async function CompetitionsPage({
   searchParams,
 }: {
-  searchParams: Promise<{ category?: string }>;
+  searchParams: Promise<{ category?: string | string[] }>;
 }) {
-  const { category } = await searchParams;
+  const category = firstSearchParam((await searchParams).category);
   const query = category ? `?limit=24&category=${encodeURIComponent(category)}` : '?limit=24';
-  const result = await serverFetch<CursorPage<Competition>>(`/competitions${query}`);
+  const result = await serverFetch<CursorPage<Competition>>(`/topics/competitions${query}`);
   const items = result.data?.items ?? [];
   const categories = Array.from(
     new Set(items.map((item) => item.category).filter((value): value is string => !!value)),
@@ -32,7 +33,7 @@ export default async function CompetitionsPage({
           本站只做整理与经验汇总。
         </p>
         <div className="mt-4 flex flex-wrap gap-2">
-          <Link href="/search/resources?q=竞赛" className="inline-flex min-h-11 items-center bg-brand px-4 text-sm font-medium text-on-color">
+          <Link href="/search?q=竞赛" className="inline-flex min-h-11 items-center bg-brand px-4 text-sm font-medium text-on-color">
             找竞赛资料
           </Link>
           <Link href="/me/guides" className="inline-flex min-h-11 items-center border border-control-border px-4 text-sm">

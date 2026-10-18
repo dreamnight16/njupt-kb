@@ -12,8 +12,8 @@ export const dynamic = 'force-dynamic';
 
 export default async function BaoyanPage() {
   const [policiesResult, experiencesResult, collegesResult] = await Promise.all([
-    serverFetch<CursorPage<BaoyanPolicy>>('/baoyan/policies?limit=20'),
-    serverFetch<CursorPage<BaoyanExperience>>('/baoyan/experiences?limit=12'),
+    serverFetch<CursorPage<BaoyanPolicy>>('/topics/baoyan/policies?limit=20'),
+    serverFetch<CursorPage<BaoyanExperience>>('/topics/baoyan/experiences?limit=12'),
     serverFetch<CollegeBrief[]>('/colleges'),
   ]);
 

@@ -12,7 +12,7 @@ export const dynamic = 'force-dynamic';
 export async function generateMetadata({ params }: { params: Promise<{ id: string }> }): Promise<Metadata> {
   const { id } = await params;
   if (!isUuid(id)) return { title: '保研经验' };
-  const result = await serverFetch<BaoyanExperience>(`/baoyan/experiences/${id}`);
+  const result = await serverFetch<BaoyanExperience>(`/topics/baoyan/experiences/${id}`);
   return { title: result.data ? `${result.data.target_university} 保研经验` : '保研经验' };
 }
 
@@ -24,7 +24,7 @@ function text(value: unknown): string | null {
 export default async function BaoyanExperiencePage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
   if (!isUuid(id)) notFound();
-  const result = await serverFetch<BaoyanExperience>(`/baoyan/experiences/${id}`);
+  const result = await serverFetch<BaoyanExperience>(`/topics/baoyan/experiences/${id}`);
   if (result.error?.status === 404) notFound();
   const item = result.data;
   if (!item) return <Notice tone="warning" title="经验帖暂时无法加载">{result.error?.message ?? '请稍后重试。'}</Notice>;

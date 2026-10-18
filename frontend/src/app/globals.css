@@ -115,7 +115,7 @@
 
   /* 列表入场：子项按顺序轻量进入，只在新节点挂载时播放，不会因数据刷新重播。 */
   .dn-stagger > * {
-    animation: dn-enter var(--dn-duration-page) var(--dn-ease-in) both;
+    animation: dn-enter var(--dn-duration-page) var(--dn-ease-in) backwards;
   }
 
   .dn-stagger > *:nth-child(1) { animation-delay: calc(var(--dn-stagger) * 0); }

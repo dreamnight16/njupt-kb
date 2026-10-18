@@ -1,35 +1,36 @@
 'use client';
 
 import Link from 'next/link';
-import { FormEvent, useCallback, useEffect, useState } from 'react';
-import { useMutation } from '@tanstack/react-query';
+import { FormEvent, useState } from 'react';
+import { useMutation, useQuery } from '@tanstack/react-query';
 
 import { Notice } from '@/components/common/Notice';
 import { Button } from '@/components/ui/Button';
 import { Input } from '@/components/ui/Input';
-import { Captcha, fetchCaptcha, register } from '@/lib/api/auth';
+import { fetchCaptcha, register } from '@/lib/api/auth';
 import { describeError } from '@/lib/api/client';
 
 export function RegisterForm() {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [displayName, setDisplayName] = useState('');
-  const [captcha, setCaptcha] = useState<Captcha | null>(null);
   const [captchaCode, setCaptchaCode] = useState('');
 
   // 一次性验证码：进入页面与每次提交失败后都换新码，避免旧码已被消费。
-  const loadCaptcha = useCallback(async () => {
-    setCaptchaCode('');
-    try {
-      setCaptcha(await fetchCaptcha('register'));
-    } catch {
-      setCaptcha(null);
-    }
-  }, []);
+  const captchaQuery = useQuery({
+    queryKey: ['register-captcha'],
+    queryFn: () => fetchCaptcha('register'),
+    retry: false,
+    gcTime: 0,
+    refetchOnWindowFocus: false,
+    refetchOnReconnect: false,
+  });
+  const captcha = captchaQuery.isError ? null : captchaQuery.data;
 
-  useEffect(() => {
-    void loadCaptcha();
-  }, [loadCaptcha]);
+  function loadCaptcha() {
+    setCaptchaCode('');
+    void captchaQuery.refetch();
+  }
 
   const registerMutation = useMutation({
     mutationFn: () =>
@@ -42,7 +43,7 @@ export function RegisterForm() {
       }),
     onError: () => {
       // 提交失败后旧码可能已失效/被消费，换新码再试。
-      void loadCaptcha();
+      loadCaptcha();
     },
   });
 
@@ -87,7 +88,7 @@ export function RegisterForm() {
         <p className="dn-kicker text-text-secondary">CREATE ACCOUNT</p>
         <h1 className="dn-display mt-1 text-3xl">注册</h1>
         <p className="mt-2 text-sm text-text-secondary">
-          注册后需完成邮箱验证才能上传资料。
+          注册后可管理自己的资料；如需邮箱验证，请按注册结果中的提示完成。
         </p>
       </header>
 
@@ -147,11 +148,15 @@ export function RegisterForm() {
             <button
               type="button"
               onClick={() => void loadCaptcha()}
+              disabled={captchaQuery.isFetching || registerMutation.isPending}
+              aria-busy={captchaQuery.isFetching}
               aria-label="换一张验证码"
               title="点击刷新验证码"
               className="min-h-11 shrink-0 border border-divider bg-white px-2 hover:bg-canvas"
             >
-              {captcha ? (
+              {captchaQuery.isFetching ? (
+                <span className="flex h-[45px] w-28 items-center justify-center text-xs text-text-secondary">加载中…</span>
+              ) : captcha ? (
                 // eslint-disable-next-line @next/next/no-img-element
                 <img
                   src={captcha.image}
@@ -172,7 +177,7 @@ export function RegisterForm() {
           </p>
         </div>
 
-        <Button type="submit" className="w-full" isLoading={registerMutation.isPending}>
+        <Button type="submit" className="w-full" isLoading={registerMutation.isPending} disabled={!captcha || captchaQuery.isFetching}>
           注册
         </Button>
       </form>

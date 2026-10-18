@@ -10,7 +10,7 @@ export const metadata: Metadata = { title: '考研专题' };
 export const dynamic = 'force-dynamic';
 
 export default async function KaoyanPage() {
-  const result = await serverFetch<CursorPage<KaoyanSchool>>('/kaoyan/schools?limit=40');
+  const result = await serverFetch<CursorPage<KaoyanSchool>>('/topics/kaoyan/schools?limit=40');
   const schools = result.data?.items ?? [];
 
   return (
@@ -22,7 +22,7 @@ export default async function KaoyanPage() {
           分数线按「院校 + 专业 + 年份」记录，并尽量标注来源。缺记录不等于没有招生，也不代表下一年度不变。
         </p>
         <div className="mt-4 flex flex-wrap gap-2">
-          <Link href="/search/resources?q=考研" className="inline-flex min-h-11 items-center bg-brand px-4 text-sm font-medium text-on-color">
+          <Link href="/search?q=考研" className="inline-flex min-h-11 items-center bg-brand px-4 text-sm font-medium text-on-color">
             找考研资料
           </Link>
           <Link href="/me/guides" className="inline-flex min-h-11 items-center border border-control-border px-4 text-sm">

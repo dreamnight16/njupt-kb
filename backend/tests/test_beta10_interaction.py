@@ -3,7 +3,6 @@
 import unittest
 from datetime import datetime, timedelta, timezone
 
-from sqlalchemy import select
 
 from app.core.errors import Conflict, Forbidden, InvalidInput
 from app.modules.access.models import AccessPolicy
@@ -13,7 +12,7 @@ from app.modules.interaction import recommendations, service
 from app.modules.interaction.comment_management import manage_comment
 from app.modules.interaction.models import Comment, Rating
 from app.modules.moderation import comment_reports
-from app.modules.moderation.models import AppealStatus, Report
+from app.modules.moderation.models import AppealStatus
 import test_content_workflow as workflow
 
 

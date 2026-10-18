@@ -91,7 +91,9 @@ export default function NotificationsPage() {
                         ? `/me/cases/${item.data.case_id}`
                         : item.type === 'contributor_application_result'
                           ? '/me/contributor-application'
-                          : item.type === 'assignment_changed' ? '/me' : null;
+                            : typeof item.data?.experience_id === 'string' && isUuid(item.data.experience_id) && item.data.status === 'active'
+                              ? `/baoyan/experiences/${item.data.experience_id}`
+                              : item.type === 'assignment_changed' ? '/me' : null;
               return (
                 <li
                   key={item.id}

@@ -12,7 +12,7 @@ export const dynamic = 'force-dynamic';
 export async function generateMetadata({ params }: { params: Promise<{ id: string }> }): Promise<Metadata> {
   const { id } = await params;
   if (!isUuid(id)) return { title: '竞赛详情' };
-  const result = await serverFetch<Competition>(`/competitions/${id}`);
+  const result = await serverFetch<Competition>(`/topics/competitions/${id}`);
   return { title: result.data?.name ?? '竞赛详情' };
 }
 
@@ -29,7 +29,7 @@ function listText(value: unknown): string {
 export default async function CompetitionDetailPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
   if (!isUuid(id)) notFound();
-  const result = await serverFetch<Competition>(`/competitions/${id}`);
+  const result = await serverFetch<Competition>(`/topics/competitions/${id}`);
   if (result.error?.status === 404) notFound();
   const item = result.data;
   if (!item) return <Notice tone="warning" title="竞赛暂时无法加载">{result.error?.message ?? '请稍后重试。'}</Notice>;
