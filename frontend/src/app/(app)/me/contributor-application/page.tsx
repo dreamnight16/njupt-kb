@@ -10,6 +10,7 @@ import { Button } from '@/components/ui/Button';
 import { EmptyState } from '@/components/ui/EmptyState';
 import { Input } from '@/components/ui/Input';
 import { SkeletonList } from '@/components/ui/Skeleton';
+import { ContributorStatusForm } from '@/components/workspace/ContributorStatusForm';
 import { describeError } from '@/lib/api/client';
 import {
   CONTRIBUTOR_ONBOARDING_STATUS_LABELS,
@@ -232,6 +233,9 @@ function ApplicationItem({ application }: { application: ContributorApplicationO
           </li>
         ))}
       </ol>
+      {(application.status === 'active' || application.status === 'suspended') && (
+        <ContributorStatusForm application={application} selfExit />
+      )}
     </li>
   );
 }

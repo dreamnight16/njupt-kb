@@ -60,7 +60,7 @@ from app.core.enums import (
 from app.core.errors import Conflict, Forbidden, InvalidInput, NotFound
 from app.core.events import emit_event
 from app.core.pagination import decode_cursor, encode_cursor, normalize_page_size
-from app.core.permissions import RESOURCE_PUBLISH, RESOURCE_REVIEW, has_permission
+from app.core.permissions import RESOURCE_PUBLISH, RESOURCE_REVIEW, effective_permissions
 from app.core.storage import ObjectSizeExceeded, build_storage_key, storage
 from app.modules.content.derivatives import (
     PROCESSOR_VERSION,
@@ -201,6 +201,15 @@ async def mark_published(
         raise NotFound("版本不属于该资源")
     if version.review_status != ReviewStatus.APPROVED.value:
         raise Conflict("公开版本必须指向已通过审核的版本", code="VERSION_NOT_APPROVED")
+
+    pairs = await version_files(db, version.id)
+    if not pairs or len([link for link, _ in pairs if link.purpose == FilePurpose.PRIMARY.value]) != 1:
+        raise Conflict("发布版本缺少唯一主文件", code="FILE_NOT_READY")
+    if any(file.scan_status != ScanStatus.PASSED.value for _, file in pairs):
+        raise Conflict("文件尚未通过安全检查，不能发布", code="FILE_NOT_READY")
+    rights = await db.scalar(select(RightsDeclaration).where(RightsDeclaration.version_id == version.id))
+    if rights is None or rights.rights_basis not in ("original", "authorized", "open_license"):
+        raise Conflict("缺少有效展示与传播许可，不能发布", code="DISTRIBUTION_NOT_ALLOWED")
 
     result = await db.execute(
         update(Resource)
@@ -462,10 +471,11 @@ def _file_out(link: VersionFile, file: ResourceFile) -> FileOut:
     )
 
 
-def _is_manager(user) -> bool:
-    return bool(user) and (
-        has_permission(user, RESOURCE_REVIEW) or has_permission(user, RESOURCE_PUBLISH)
-    )
+async def _is_manager(db: AsyncSession, user) -> bool:
+    if user is None:
+        return False
+    granted = await effective_permissions(db, user)
+    return RESOURCE_REVIEW in granted or RESOURCE_PUBLISH in granted
 
 
 async def _preview_ready(db: AsyncSession, version_id: uuid.UUID) -> bool:
@@ -887,10 +897,19 @@ async def submit_version(
 async def withdraw_resource(
     db: AsyncSession, *, user, resource_id: uuid.UUID, payload, request_id: str | None
 ) -> PublicationOut:
-    """作者或管理员撤回；撤回不物理删除文件（§13.3）。"""
+    """作者、管理员或受管资料管理员撤回；撤回不物理删除文件（§13.3）。
+
+    权限判定 = owner ∨ 管理员 ∨ 该资源上有效的 `MANAGE` 分配。分配是 owner 之外的
+    **追加**判定，不放宽审核权限：审核仍由 `RESOURCE_REVIEW` 决定（§3.3）。
+    无权限时统一 404，不泄露资源是否存在（§25.1）；审计 actor 记实际操作人。
+    """
     resource = await get_resource(db, resource_id)
     if resource.owner_id != user.id and user.role != "admin":
-        raise NotFound("资源不存在")
+        from app.core.enums import AssignmentCapability
+        from app.modules.assignment.service import can_manage_resource
+
+        if not await can_manage_resource(db, user, resource.id, AssignmentCapability.MANAGE):
+            raise NotFound("资源不存在")
     if resource.publication_status != PublicationStatus.PUBLISHED.value:
         raise Conflict("资源当前不处于已发布状态，无法撤回", code="NOT_PUBLISHED")
     await mark_withdrawn(
@@ -927,7 +946,7 @@ async def get_resource_detail(db: AsyncSession, *, user, resource_id: uuid.UUID)
         resource.publication_status == PublicationStatus.PUBLISHED.value
         and resource.published_version_id is not None
     )
-    if not (is_public or manages or _is_manager(user)):
+    if not (is_public or manages or await _is_manager(db, user)):
         raise NotFound("资源不存在")
 
     version = await published_version(db, resource)
@@ -1145,7 +1164,7 @@ async def list_version_files(
         and resource.published_version_id == version.id
     )
     # 历史版本默认仅作者与有权限管理人员可见（§12.1、D08）。
-    if not (manages or is_public or _is_manager(user)):
+    if not (manages or is_public or await _is_manager(db, user)):
         raise NotFound("版本不存在")
 
     from app.modules.access.service import authorize
@@ -1165,6 +1184,13 @@ async def list_version_files(
 # 上传会话（§16 步骤 1-4）
 # --------------------------------------------------------------------------- #
 async def create_upload_session(db: AsyncSession, *, user, payload: UploadCreateIn) -> UploadCreateOut:
+    """创建上传会话（§16 步骤 1-4）。
+
+    `resource_id` 非空时，owner 之外**追加**该资源上的有效 `MAINTAIN` 分配判定，
+    使受管资料管理员能为受管资源上传文件。此处只放行「创建上传会话」，
+    不放宽后续「提交版本」链路的既有权限规则（`_ensure_owner` 保持原样）。
+    会话的 `uploader_id` 始终记实际创建人，不改变资源归属。
+    """
     mime = payload.declared_mime.strip().lower()
     if mime not in settings.ALLOWED_UPLOAD_MIME:
         raise InvalidInput("不支持的文件类型", details={"allowed": settings.ALLOWED_UPLOAD_MIME})
@@ -1174,7 +1200,13 @@ async def create_upload_session(db: AsyncSession, *, user, payload: UploadCreate
     if payload.resource_id is not None:
         resource = await get_resource(db, payload.resource_id)
         if resource.owner_id != user.id:
-            raise NotFound("资源不存在")
+            from app.core.enums import AssignmentCapability
+            from app.modules.assignment.service import can_manage_resource
+
+            if not await can_manage_resource(
+                db, user, resource.id, AssignmentCapability.MAINTAIN
+            ):
+                raise NotFound("资源不存在")
 
     storage_key = build_storage_key("uploads", payload.original_name)
     session = UploadSession(

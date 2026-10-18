@@ -30,6 +30,7 @@ from app.modules.ratelimit.models import TIERS, RateLimitCounter
 # 动作 -> settings 中的分级限额 dict。新增动作时在此登记，避免在 enforce 里散落 if。
 _LIMIT_SETTINGS: dict[str, str] = {
     "login": "RATE_LIMIT_LOGIN",
+    "mfa": "RATE_LIMIT_MFA",
     "search": "RATE_LIMIT_SEARCH",
     "browse": "RATE_LIMIT_BROWSE",
     "resource": "RATE_LIMIT_RESOURCE",

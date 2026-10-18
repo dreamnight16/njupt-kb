@@ -26,7 +26,7 @@ from app.config import settings
 from app.core.enums import DerivativeKind
 from app.modules.content.scanning import DOCX_MIME, JPEG_MIME, PDF_MIME, PNG_MIME, PPTX_MIME
 
-PROCESSOR_VERSION = "derive/2"
+PROCESSOR_VERSION = "derive/3"
 
 
 class DerivativeError(Exception):

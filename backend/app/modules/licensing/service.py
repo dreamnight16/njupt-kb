@@ -16,9 +16,10 @@
 3. 生效协议/比例被修改 → 生成新版本，旧版本保持。
 4. 一流水仅确认一次：唯一约束（版本/方案 + 主体）+ 可选 `Idempotency-Key`。
 
-关于域事件：`domain_events.event_type` 有指向 `app.core.enums.DomainEventType` 的
-CheckConstraint，而该枚举当前没有 licensing 事件类型；按「不自己加枚举」要求，
-本模块不写域事件，仅写审计（见交付报告）。
+关于域事件：beta16 起 `DomainEventType` 已提供授权与定价的四个取值
+（`AGREEMENT_ACCEPTED`／`PRICE_PROPOSED`／`PRICE_CONFIRMED`／`PRICE_REJECTED`），
+本模块在这些时机各写一条域事件，供 notification 模块转换为站内通知。
+事件 payload 只放必要 id 与状态，不放哈希、身份证明或金额明细。
 """
 
 from __future__ import annotations
@@ -36,8 +37,9 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.config import settings
 from app.core import idempotency as idem
 from app.core.audit import record_audit
-from app.core.enums import AgreementState, PriceProposalState
+from app.core.enums import AgreementState, DomainEventType, PriceProposalState
 from app.core.errors import Conflict, Forbidden, InvalidInput, NotEnabled, NotFound
+from app.core.events import emit_event
 from app.core.pagination import (
     CursorPage,
     encode_cursor,
@@ -79,6 +81,7 @@ __all__ = [
     "create_price_proposal",
     "accept_price_proposal",
     "admin_accept_price_proposal",
+    "reject_price_proposal",
     "create_agreement",
     "create_agreement_version",
     "publish_revenue_rule",
@@ -365,9 +368,29 @@ async def accept_agreement(
         .all()
     )
     required = {agreement.contributor_party_id, agreement.platform_party_id}
-    if required <= accepted_parties:
+    both_accepted = required <= accepted_parties
+    if both_accepted:
         version.state = AgreementState.ACTIVE.value
         agreement.state = AgreementState.ACTIVE.value
+
+    # 每次主体确认各写一条事件，通知另一签约方；按「版本 + 主体」去重，
+    # 重放同一确认不会重复投递（幂等由 unique(event_type, dedupe_key) 兜底）。
+    await emit_event(
+        db,
+        event_type=DomainEventType.AGREEMENT_ACCEPTED,
+        subject_type="agreement_version",
+        subject_id=version.id,
+        subject_version=version.version_no,
+        payload={
+            "agreement_id": str(agreement.id),
+            "agreement_version_id": str(version.id),
+            "party_id": str(party_id),
+            "actor_id": str(user.id),
+            "version_state": version.state,
+            "both_accepted": both_accepted,
+        },
+        dedupe_key=f"agreement-accepted:{version.id}:{party_id}",
+    )
 
     await record_audit(
         db,
@@ -482,6 +505,22 @@ async def create_price_proposal(
         },
         request_id=request_id,
     )
+    # 提案/重建版本各写一条事件；金额明细留在审计与提案行，事件只放 id 与状态。
+    await emit_event(
+        db,
+        event_type=DomainEventType.PRICE_PROPOSED,
+        subject_type="price_proposal",
+        subject_id=proposal.id,
+        subject_version=version_no,
+        payload={
+            "product_id": str(product_id),
+            "price_proposal_id": str(proposal.id),
+            "version_no": version_no,
+            "state": proposal.state,
+            "proposed_by": str(user.id),
+        },
+        dedupe_key=f"price-proposed:{proposal.id}",
+    )
     await db.flush()
 
     out = _proposal_out(proposal, contributor_party_id=product.owner_id)
@@ -585,6 +624,24 @@ async def _record_price_acceptance(
         },
         request_id=request_id,
     )
+    if proposal.state == PriceProposalState.CONFIRMED.value:
+        # 双方同版本同哈希确认：只在这一刻写一次事件，重试不重复投递。
+        await emit_event(
+            db,
+            event_type=DomainEventType.PRICE_CONFIRMED,
+            subject_type="price_proposal",
+            subject_id=proposal.id,
+            subject_version=proposal.version_no,
+            payload={
+                "product_id": str(proposal.product_id),
+                "price_proposal_id": str(proposal.id),
+                "version_no": proposal.version_no,
+                "state": proposal.state,
+                "party_id": str(party_id),
+                "actor_id": str(actor_id),
+            },
+            dedupe_key=f"price-confirmed:{proposal.id}",
+        )
     await db.flush()
     # 状态更新会令 server 端 onupdate 的 updated_at 过期；显式刷新，避免在异步上下文懒加载。
     await db.refresh(proposal)
@@ -690,6 +747,78 @@ async def admin_accept_price_proposal(
             response=out.model_dump(mode="json"),
         )
     return out
+
+
+async def reject_price_proposal(
+    db: AsyncSession,
+    *,
+    user: "User",
+    proposal_id: uuid.UUID,
+    reason: str,
+    request_id: str | None,
+) -> PriceProposalOut:
+    """否决一个尚未确认的价格版本（§7.1）。
+
+    `PriceProposalState` 目前没有 REJECTED 取值（`app/core/enums.py` 本轮冻结，
+    新增取值需要迁移），因此复用 `WITHDRAWN` 作为「不可再确认」的终态；
+    「否决」与「提案方撤回」的差别只由域事件 `price.rejected` 与审计区分，
+    旧版本金额不被覆盖（不变量 3）。
+
+    主体判定与确认一致：权利方本人或持 `PRICE_CONFIRM` 的平台人员；
+    已确认/已失效的方案不能否决（Conflict）。
+    """
+    _require_enabled()
+    proposal = await db.get(PriceProposal, proposal_id)
+    if proposal is None:
+        raise NotFound("价格方案不存在")
+    if proposal.state not in _OPEN_PRICE_STATES:
+        raise Conflict("该价格方案已失效，不能拒绝", code="PRICE_PROPOSAL_INACTIVE")
+    text = (reason or "").strip()
+    if not text:
+        raise InvalidInput("reason 必填")
+
+    owner = await _product_owner_id(db, proposal.product_id)
+    if owner is not None and user.id == owner:
+        party_id = owner
+    else:
+        granted = await effective_permissions(db, user)
+        if PRICE_CONFIRM not in granted:
+            raise Forbidden("你不是该价格方案的权利方，也没有价格确认权限")
+        party_id = PLATFORM_PARTY_ID
+
+    proposal.state = PriceProposalState.WITHDRAWN.value
+    await db.flush()
+    await record_audit(
+        db,
+        action="licensing.price.rejected",
+        object_type="price_proposal",
+        object_id=proposal.id,
+        object_version=proposal.version_no,
+        actor_id=user.id,
+        after={"party_id": str(party_id), "state": proposal.state},
+        reason=text,
+        request_id=request_id,
+    )
+    await emit_event(
+        db,
+        event_type=DomainEventType.PRICE_REJECTED,
+        subject_type="price_proposal",
+        subject_id=proposal.id,
+        subject_version=proposal.version_no,
+        payload={
+            "product_id": str(proposal.product_id),
+            "price_proposal_id": str(proposal.id),
+            "version_no": proposal.version_no,
+            "state": proposal.state,
+            "rejected_by": str(party_id),
+            "actor_id": str(user.id),
+        },
+        dedupe_key=f"price-rejected:{proposal.id}",
+    )
+    await db.flush()
+    # 状态更新会令 onupdate 的 updated_at 过期；显式刷新，避免异步上下文懒加载。
+    await db.refresh(proposal)
+    return _proposal_out(proposal, contributor_party_id=owner)
 
 
 # --------------------------------------------------------------------------- #
@@ -922,10 +1051,15 @@ async def list_admin_agreements(
 
 
 async def list_admin_price_proposals(
-    db: AsyncSession, *, limit: int | None, cursor: str | None
+    db: AsyncSession, *, limit: int | None, cursor: str | None,
+    owner_id: uuid.UUID | None = None,
 ) -> CursorPage[PriceProposalOut]:
+    stmt = select(PriceProposal)
+    if owner_id is not None:
+        from app.modules.commerce.models import Product
+        stmt = stmt.join(Product, Product.id == PriceProposal.product_id).where(Product.owner_id == owner_id)
     rows, next_cursor, has_more = await _page(
-        db, select(PriceProposal), model=PriceProposal, limit=limit, cursor=cursor
+        db, stmt, model=PriceProposal, limit=limit, cursor=cursor
     )
     owner_by_product: dict[uuid.UUID, uuid.UUID | None] = {}
     if rows:

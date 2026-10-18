@@ -19,7 +19,7 @@ function entitlementState(item: EntitlementItem) {
   if (item.starts_at && new Date(item.starts_at).getTime() > Date.now()) return '待生效';
   return '有效';
 }
-export function EntitlementWorkspace({ initialUser = '' }: { initialUser?: string }) { return <ManagementGuard><Entitlements initialUser={initialUser} /></ManagementGuard>; }
+export function EntitlementWorkspace({ initialUser = '' }: { initialUser?: string }) { return <ManagementGuard permission="entitlement.grant"><Entitlements initialUser={initialUser} /></ManagementGuard>; }
 function Entitlements({ initialUser }: { initialUser: string }) {
   const client = useQueryClient();
   const [filter, setFilter] = useState(initialUser);

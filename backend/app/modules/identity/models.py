@@ -31,7 +31,7 @@ from app.core.enums import (
 )
 from app.db import Base, Timestamped, UUIDPrimaryKey
 
-__all__ = ["User", "UserProfile", "UserIdentity", "Session", "AuthToken"]
+__all__ = ["User", "UserProfile", "UserIdentity", "Session", "AuthToken", "UserMFA"]
 
 
 def _enum_values(enum_cls: type[Enum]) -> str:
@@ -145,6 +145,20 @@ class Session(Base, UUIDPrimaryKey, Timestamped):
     revoke_reason: Mapped[str | None] = mapped_column(String(120), nullable=True)
     user_agent: Mapped[str | None] = mapped_column(String(400), nullable=True)
     client_ip: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    mfa_verified_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
+
+class UserMFA(Base, Timestamped):
+    """验证器种子只存认证密文；恢复码只存摘要，成功使用后立即移除。"""
+    __tablename__ = "user_mfa"
+
+    user_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("users.id"), primary_key=True)
+    secret_ciphertext: Mapped[str | None] = mapped_column(String(512), nullable=True)
+    enabled_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    setup_expires_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    last_counter: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    recovery_hashes: Mapped[list[str]] = mapped_column(JSON, nullable=False, default=list)
+    revision: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
 
 
 class AuthToken(Base, UUIDPrimaryKey, Timestamped):

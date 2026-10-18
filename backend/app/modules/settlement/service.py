@@ -581,7 +581,7 @@ async def reconcile_payout_attempt(
     ).scalar_one_or_none()
     if attempt is None:
         raise NotFound("付款尝试不存在")
-    if attempt.state not in (PayoutStatus.PROCESSING.value, PayoutStatus.CREATED.value):
+    if attempt.state not in (PayoutStatus.PROCESSING.value, PayoutStatus.CREATED.value, PayoutStatus.UNCERTAIN.value):
         raise Conflict("当前付款尝试状态不可核对", code="ATTEMPT_NOT_RECONCILABLE")
     if not payload.evidence_ref or not payload.evidence_ref.strip():
         raise InvalidInput("核对付款结果必须提供真实证据", details={"reason": "evidence_ref_required"})
@@ -882,3 +882,14 @@ async def list_admin_payouts(
         next_cursor=next_cursor,
         has_more=has_more,
     )
+
+
+async def list_payout_attempts(
+    db: AsyncSession, *, payout_id: uuid.UUID, limit: int | None, cursor: str | None,
+) -> CursorPage[PayoutAttemptOut]:
+    await _load_payout(db, payout_id)
+    rows, next_cursor, has_more = await _page(db,
+        select(PayoutAttempt).where(PayoutAttempt.payout_id == payout_id),
+        model=PayoutAttempt, limit=limit, cursor=cursor)
+    return CursorPage(items=[PayoutAttemptOut.model_validate(row) for row in rows],
+                      next_cursor=next_cursor, has_more=has_more)

@@ -9,7 +9,7 @@ import { describeError } from '@/lib/api/client';
 import { formatDateTime } from '@/lib/utils';
 import { ContributionHistory } from '@/components/resource/ContributionHistory';
 
-const states = { draft: '草稿', pending: '审核中', approved: '已通过', rejected: '已驳回' };
+const states = { draft: '草稿', pending: '审核中', needs_info: '需要补证', approved: '已通过', rejected: '已驳回' };
 
 export default function MyResourcesPage() {
   const query = useInfiniteQuery({

@@ -95,6 +95,19 @@ class CreatorProfileUpdate(_InputModel):
 ContributorDecision = Literal["under_review", "active", "rejected"]
 
 
+class ContributorLifecycleIn(_InputModel):
+    expected_status: Literal["active", "suspended"]
+    status: Literal["active", "suspended", "exited"]
+    reason: str = Field(min_length=1, max_length=255)
+
+    @field_validator("reason")
+    @classmethod
+    def _required_reason(cls, value: str) -> str:
+        if not value.strip():
+            raise ValueError("理由不能为空白")
+        return value.strip()
+
+
 class ContributorApplicationCreate(_InputModel):
     """入驻申请：说明能力与权利材料；普通用户登录即可提交。"""
 

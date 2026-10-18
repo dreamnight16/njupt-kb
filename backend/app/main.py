@@ -105,6 +105,15 @@ app.include_router(health_router)
 app.include_router(health_router, prefix=settings.API_PREFIX)
 
 
+@app.get(f"{settings.API_PREFIX}/features", tags=["features"])
+async def feature_flags() -> dict[str, bool]:
+    """只公开界面所需的启用状态，不返回配置或供应商信息。"""
+    return {
+        "commerce_enabled": settings.COMMERCE_ENABLED and not settings.COMMERCE_COMPLIANCE_GATE_CLOSED,
+        "ai_enabled": settings.AI_ENABLED,
+    }
+
+
 # --- 业务模块路由（顺序与 docs/ARCHITECTURE.md 一致）---
 from app.modules.access.router import router as access_router  # noqa: E402
 from app.modules.ai.router import router as ai_router  # noqa: E402
@@ -115,17 +124,22 @@ from app.modules.commerce.router import router as commerce_router  # noqa: E402
 from app.modules.content.router import router as content_router  # noqa: E402
 from app.modules.creator.router import router as creator_router  # noqa: E402
 from app.modules.identity.router import router as identity_router  # noqa: E402
+from app.modules.identity.mfa_router import router as mfa_router  # noqa: E402
 from app.modules.interaction.router import router as interaction_router  # noqa: E402
 from app.modules.jobs.router import router as jobs_router  # noqa: E402
 from app.modules.licensing.router import router as licensing_router  # noqa: E402
 from app.modules.moderation.router import router as moderation_router  # noqa: E402
 from app.modules.notification.router import router as notification_router  # noqa: E402
 from app.modules.ops.router import router as ops_router  # noqa: E402
+from app.modules.search.router import router as search_router  # noqa: E402
 from app.modules.settlement.router import router as settlement_router  # noqa: E402
 from app.modules.topics.router import router as topics_router  # noqa: E402
 
 for _router in (
+    # beta16：统一搜索先注册，占用 `/search`；interaction 的资源搜索已迁至 `/search/resources`。
+    search_router,
     identity_router,
+    mfa_router,
     catalog_router,
     content_router,
     moderation_router,

@@ -6,7 +6,7 @@ import { Button } from '@/components/ui/Button';
 import { SkeletonList } from '@/components/ui/Skeleton';
 import { describeError } from '@/lib/api/client';
 import { getWorkspacePage } from '@/lib/api/workspaces';
-import { isAdmin, useAuthStore } from '@/stores/authStore';
+import { hasPermission, isAdmin, useAuthStore } from '@/stores/authStore';
 
 export const fieldClass = 'min-h-11 w-full border border-control-border bg-surface px-3 py-2 text-sm';
 export function useWorkspaceList<T>(key: string, path: string, params: Record<string, string> = {}) {
@@ -25,8 +25,8 @@ export function QueryFeedback({ pending, error, empty, retry, emptyText = '暂�
   if (pending) return <SkeletonList count={3} />;
   return empty ? <Notice title={emptyText} /> : null;
 }
-export function ManagementGuard({ children, reviewer = false }: { children: ReactNode; reviewer?: boolean }) {
+export function ManagementGuard({ children, reviewer = false, permission }: { children: ReactNode; reviewer?: boolean; permission?: string }) {
   const user = useAuthStore(s => s.user);
-  if (!isAdmin(user) && !(reviewer && user?.role === 'reviewer')) return <Notice title="需要管理权限" />;
+  if (permission ? !hasPermission(user, permission) : !isAdmin(user) && !(reviewer && user?.role === 'reviewer')) return <Notice title="需要管理权限" />;
   return <>{children}</>;
 }

@@ -9,7 +9,7 @@ import { Button } from "@/components/ui/Button";
 import { Notice } from "@/components/common/Notice";
 import { api, describeError } from "@/lib/api/client";
 import type { CursorPage } from "@/lib/api/types";
-import { isAdmin, useAuthStore } from "@/stores/authStore";
+import { hasPermission, useAuthStore } from "@/stores/authStore";
 interface FailedEvent {
   id: string;
   event_type: string;
@@ -19,7 +19,7 @@ interface FailedEvent {
 }
 export default function Page() {
   const user = useAuthStore((s) => s.user);
-  return isAdmin(user) ? <Queue /> : <Notice title="需要管理员权限" />;
+  return hasPermission(user, 'job.retry') ? <Queue /> : <Notice title="需要管理员权限" />;
 }
 function Queue() {
   const user = useAuthStore((s) => s.user);
@@ -35,7 +35,7 @@ function Queue() {
         })
       ).data,
     getNextPageParam: (p) => (p.has_more ? p.next_cursor : undefined),
-    enabled: isAdmin(user),
+    enabled: hasPermission(user, 'job.retry'),
   });
   const retry = useMutation({
     mutationFn: (item: FailedEvent) =>

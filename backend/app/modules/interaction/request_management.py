@@ -14,7 +14,7 @@ from app.core.enums import AccountStatus, DomainEventType
 from app.core.errors import Conflict, Forbidden, InvalidInput, NotFound
 from app.core.events import emit_event
 from app.core.pagination import CursorPage, encode_cursor, normalize_page_size
-from app.core.permissions import REQUEST_HANDLE, has_permission
+from app.core.permissions import REQUEST_HANDLE, effective_permissions
 from app.modules.interaction.models import ResourceRequest, ResourceRequestResponse
 from app.modules.interaction.schemas import RequestItem, RequestResponseItem
 
@@ -112,7 +112,7 @@ async def change_status(
 
     active(user)
     row = await get_request(db, request_id, lock=True)
-    manager = has_permission(user, REQUEST_HANDLE)
+    manager = REQUEST_HANDLE in await effective_permissions(db, user)
     if not manager and row.requester_id != user.id:
         raise Forbidden("仅发起者或管理员可以处理需求")
     if row.status == "closed" and payload.status == "open" and not manager:
@@ -190,7 +190,7 @@ async def reopen(db, *, user, request_id, payload, request_trace_id) -> RequestI
 
     active(user)
     row = await get_request(db, request_id, lock=True)
-    manager = has_permission(user, REQUEST_HANDLE)
+    manager = REQUEST_HANDLE in await effective_permissions(db, user)
     if not manager and row.requester_id != user.id:
         raise Forbidden("仅发起者或管理员可以复核重开需求")
     if row.status == "open":

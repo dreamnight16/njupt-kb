@@ -8,12 +8,12 @@ import { Button } from '@/components/ui/Button';
 import { SkeletonCard, SkeletonList } from '@/components/ui/Skeleton';
 import { describeError } from '@/lib/api/client';
 import { fetchSecurityOverview } from '@/lib/api/admin';
-import { isAdmin, useAuthStore } from '@/stores/authStore';
+import { hasPermission, useAuthStore } from '@/stores/authStore';
 import { formatDateTime } from '@/lib/utils';
 
 export default function AdminSecurityPage() {
   const user = useAuthStore((s) => s.user);
-  return isAdmin(user) ? <SecurityOverview /> : <Notice title="需要管理员权限" />;
+  return hasPermission(user, 'audit.view') ? <SecurityOverview /> : <Notice title="需要管理员权限" />;
 }
 
 function SecurityOverview() {

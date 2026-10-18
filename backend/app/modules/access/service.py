@@ -37,7 +37,7 @@ from app.core.pagination import (
     encode_cursor,
     normalize_page_size,
 )
-from app.core.permissions import RESOURCE_REVIEW, has_permission, is_active_account
+from app.core.permissions import RESOURCE_PUBLISH, RESOURCE_REVIEW, effective_permissions, is_active_account
 from app.core.storage import storage
 from app.modules.access.models import (
     AccessPolicy,
@@ -836,7 +836,10 @@ async def _management_bypass(
         return True
     if getattr(resource, "owner_id", None) == user.id:
         return True
-    if has_permission(user, RESOURCE_REVIEW):
+    permissions = await effective_permissions(db, user)
+    if RESOURCE_PUBLISH in permissions and version.review_status == "approved":
+        return True
+    if RESOURCE_REVIEW in permissions:
         # 审核员仅在工作范围内可见原件（§15）
         from app.modules.moderation.service import can_review
         return bool(await can_review(db, user, version.id))

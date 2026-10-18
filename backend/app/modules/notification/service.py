@@ -670,6 +670,8 @@ async def _notify_contributor_application_decided(
         "active": "已通过，你已成为入驻贡献者。",
         "rejected": "未通过。",
         "under_review": "已受理，正在审核中。",
+        "suspended": "专业身份已暂停，受托管理范围已撤销。既有合同和收益记录保留。",
+        "exited": "专业身份已退出。既有合同和收益记录保留。",
     }
     body = f"你的入驻申请{outcomes.get(status, '有新的处理结果')}"
     reason = payload.get("reason")
@@ -850,6 +852,79 @@ async def _notify_rights_notice_decided(
     ]
 
 
+async def _notify_licensing_event(
+    session: AsyncSession, event: DomainEvent
+) -> list[Notification]:
+    """仅给签约方和有相应权限的平台人员发状态提醒，不携带金额和条款。"""
+    from app.core.permissions import AGREEMENT_MANAGE, PRICE_CONFIRM
+    from app.modules.assignment.models import AdminPermissionAssignment
+    from app.modules.identity.models import User
+    from app.modules.licensing.models import AgreementVersion, LicenseAgreement, PriceProposal
+    from app.modules.licensing.service import PLATFORM_PARTY_ID
+
+    agreement_event = event.event_type == DomainEventType.AGREEMENT_ACCEPTED
+    permission = AGREEMENT_MANAGE if agreement_event else PRICE_CONFIRM
+    actor_id = _payload_uuid(event, "actor_id") or _payload_uuid(event, "proposed_by")
+    if agreement_event:
+        version = await session.get(AgreementVersion, event.subject_id)
+        agreement = await session.get(LicenseAgreement, version.agreement_id) if version else None
+        if agreement is None:
+            return []
+        owner_id = agreement.contributor_party_id
+        platform_id = agreement.platform_party_id
+        acting_party = _payload_uuid(event, "party_id")
+        data = {"agreement_id": str(agreement.id)}
+    else:
+        from app.modules.commerce.models import Product
+
+        proposal = await session.get(PriceProposal, event.subject_id)
+        product = await session.get(Product, proposal.product_id) if proposal else None
+        if product is None:
+            return []
+        owner_id = product.owner_id
+        platform_id = PLATFORM_PARTY_ID
+        acting_party = (
+            _payload_uuid(event, "party_id") or _payload_uuid(event, "rejected_by") or actor_id
+        )
+        data = {"price_proposal_id": str(proposal.id)}
+
+    recipients = set()
+    if owner_id and acting_party != owner_id:
+        recipients.add(owner_id)
+    # 确认价格是双方完成的共同事实，双方都收到结果（处理人除外）。
+    confirmed = event.event_type == DomainEventType.PRICE_CONFIRMED
+    if confirmed and owner_id:
+        recipients.add(owner_id)
+    if acting_party != platform_id or confirmed:
+        if platform_id != PLATFORM_PARTY_ID:
+            recipients.add(platform_id)
+        else:
+            now = _now()
+            delegated = select(AdminPermissionAssignment.user_id).where(
+                AdminPermissionAssignment.permission == permission,
+                AdminPermissionAssignment.scope == "global",
+                AdminPermissionAssignment.scope_catalog_id.is_(None),
+                AdminPermissionAssignment.scope_resource_id.is_(None),
+                AdminPermissionAssignment.revoked_at.is_(None),
+                or_(AdminPermissionAssignment.valid_until.is_(None),
+                    AdminPermissionAssignment.valid_until > now),
+            )
+            recipients.update((await session.scalars(select(User.id).where(
+                User.status == "active", or_(User.role == "admin", User.id.in_(delegated)),
+            ))).all())
+    recipients.discard(actor_id)
+    if not recipients:
+        return []
+    recipients = set((await session.scalars(select(User.id).where(
+        User.id.in_(recipients), User.status == "active",
+    ))).all())
+    title = "授权协议确认进度" if agreement_event else "价格方案状态更新"
+    return [_build(
+        recipient, NotificationType.AGREEMENT_UPDATED if agreement_event else NotificationType.PRICE_UPDATED,
+        title, "相关方案已有更新，请查看当前版本后处理。", data,
+    ) for recipient in sorted(recipients)]
+
+
 _EVENT_HANDLERS: dict[str, _EventHandler] = {
     DomainEventType.RESOURCE_VERSION_SUBMITTED.value: _notify_version_submitted,
     DomainEventType.RESOURCE_VERSION_APPROVED.value: _notify_review_result,
@@ -875,6 +950,11 @@ _EVENT_HANDLERS: dict[str, _EventHandler] = {
     DomainEventType.RIGHTS_NOTICE_RECEIVED.value: _notify_rights_notice_received,
     DomainEventType.RIGHTS_NOTICE_COUNTER.value: _notify_rights_notice_counter,
     DomainEventType.RIGHTS_NOTICE_DECIDED.value: _notify_rights_notice_decided,
+    # --- beta16 授权协议与双向定价：登记分发（暂不构造通知，见处理器 docstring）---
+    DomainEventType.AGREEMENT_ACCEPTED.value: _notify_licensing_event,
+    DomainEventType.PRICE_PROPOSED.value: _notify_licensing_event,
+    DomainEventType.PRICE_CONFIRMED.value: _notify_licensing_event,
+    DomainEventType.PRICE_REJECTED.value: _notify_licensing_event,
 }
 
 

@@ -23,12 +23,14 @@ export interface RegisterResponse {
 export interface LoginRequest {
   email: string;
   password: string;
+  otp?: string;
 }
 
 export interface MeResponse {
   id: string;
   email: string;
   role: Role;
+  permissions?: string[];
   status: AccountStatus;
   display_name: string;
   avatar_url: string | null;

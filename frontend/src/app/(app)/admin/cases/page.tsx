@@ -33,7 +33,7 @@ import {
   type MeasureOut,
 } from '@/lib/api/cases';
 import { formatDateTime, isUuid } from '@/lib/utils';
-import { canReview, useAuthStore } from '@/stores/authStore';
+import { hasPermission, useAuthStore } from '@/stores/authStore';
 
 const statusTone: Record<CaseStatus, 'gray' | 'yellow' | 'blue' | 'green' | 'orange'> = {
   open: 'yellow',
@@ -50,7 +50,7 @@ const AMOUNT_MEASURES: CaseMeasureKind[] = ['block_sales', 'freeze_revenue'];
 
 export default function AdminCasesPage() {
   const user = useAuthStore((s) => s.user);
-  return canReview(user) ? <CasesPanel /> : <Notice title="需要案件处理权限" />;
+  return hasPermission(user, 'case.handle') ? <CasesPanel /> : <Notice title="需要案件处理权限" />;
 }
 
 function CasesPanel() {

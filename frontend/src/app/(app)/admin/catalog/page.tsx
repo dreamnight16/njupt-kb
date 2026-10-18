@@ -22,7 +22,7 @@ import {
   type CatalogItem,
   type CatalogMergeImpact,
 } from '@/lib/api/admin';
-import { isAdmin, useAuthStore } from '@/stores/authStore';
+import { hasPermission, useAuthStore } from '@/stores/authStore';
 
 const TABS: { value: CatalogEntityType; label: string; nameLabel: string }[] = [
   { value: 'university', label: '大学', nameLabel: '学校名称' },
@@ -57,7 +57,7 @@ const SEASONS = [
 
 export default function AdminCatalogPage() {
   const user = useAuthStore((s) => s.user);
-  return isAdmin(user) ? <Catalog /> : <Notice title="需要管理员权限" />;
+  return hasPermission(user, 'catalog.manage') ? <Catalog /> : <Notice title="需要管理员权限" />;
 }
 
 function Catalog() {

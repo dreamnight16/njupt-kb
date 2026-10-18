@@ -58,9 +58,12 @@ async def recommend_resources(
 
 
 # --- 搜索（§19）---
+# beta16：`/search` 让位给 search 模块的统一搜索入口（课程/资源/创作者三组）。
+# 本端点保留原有筛选能力（学院、培养方案、教师、学年等），迁至 `/search/resources`，
+# 语义不变、参数不变，仅路径变化；前端搜索页在同一批次内改调新入口。
 
 
-@router.get("/search", response_model=CursorPage[SearchItem])
+@router.get("/search/resources", response_model=CursorPage[SearchItem])
 async def search_resources(
     q: str | None = Query(default=None, description="课程名、代码、简称、资料标题或教师姓名"),
     university_id: uuid.UUID | None = None,

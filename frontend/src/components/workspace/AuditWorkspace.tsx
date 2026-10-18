@@ -4,10 +4,11 @@ import { Button } from '@/components/ui/Button';
 import { Input } from '@/components/ui/Input';
 import type { AuditItem } from '@/lib/api/workspaces';
 import { formatDateTime } from '@/lib/utils';
+import { AuditExportPanel } from './AuditExportPanel';
 import { ManagementGuard, QueryFeedback, useWorkspaceList } from './Workspace';
 
 export function AuditWorkspace({ initialType = '', initialId = '' }: { initialType?: string; initialId?: string }) {
-  return <ManagementGuard reviewer><Audit initialType={initialType} initialId={initialId} /></ManagementGuard>;
+  return <ManagementGuard permission="audit.view"><Audit initialType={initialType} initialId={initialId} /></ManagementGuard>;
 }
 function Audit({ initialType, initialId }: { initialType: string; initialId: string }) {
   const [action, setAction] = useState('');
@@ -29,6 +30,7 @@ function Audit({ initialType, initialId }: { initialType: string; initialId: str
       <Input label="结束时间" type="datetime-local" value={to} onChange={e => setTo(e.target.value)} />
       <div className="flex gap-3"><Button type="submit">查询</Button><Button type="button" variant="secondary" onClick={() => { setAction(''); setObjectType(''); setObjectId(''); setActor(''); setFrom(''); setTo(''); setFilters({}); }}>清空</Button></div>
     </form>
+    <AuditExportPanel />
     <QueryFeedback pending={query.isPending} error={query.error} empty={!rows.length} retry={() => query.refetch()} />
     <ul className="space-y-3">{rows.map(row => <li key={row.id} className="space-y-3 border border-divider p-5"><header className="flex flex-wrap justify-between gap-3"><h3 className="break-all font-semibold">{row.action}</h3><time className="text-sm text-text-secondary">{formatDateTime(row.created_at)}</time></header><p className="break-all text-sm">{row.object_type} · {row.object_id ?? '—'}</p>{row.reason && <p className="whitespace-pre-wrap text-sm">{row.reason}</p>}<details className="text-sm"><summary className="cursor-pointer">变更详情</summary><dl className="mt-3 space-y-2 break-all text-text-secondary"><div>操作者：{row.actor_id ?? '系统'}</div><div>请求 ID：{row.request_id ?? '—'}</div></dl><div className="mt-3 grid gap-3 lg:grid-cols-2">{[['变更前', row.before_state], ['变更后', row.after_state]].map(([label, value]) => <section key={String(label)} className="min-w-0"><h4 className="font-medium">{String(label)}</h4><pre className="mt-2 max-h-64 overflow-auto whitespace-pre-wrap break-all bg-canvas p-3 text-xs">{JSON.stringify(value, null, 2)}</pre></section>)}</div></details></li>)}</ul>
     {query.hasNextPage && <Button onClick={() => query.fetchNextPage()} isLoading={query.isFetchingNextPage}>更多审计记录</Button>}

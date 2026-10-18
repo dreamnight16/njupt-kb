@@ -1,7 +1,7 @@
 'use client';
 
 import Link from 'next/link';
-import { usePathname } from 'next/navigation';
+import { usePathname, useRouter } from 'next/navigation';
 import { useEffect, useRef, useState } from 'react';
 import {
   Award,
@@ -23,7 +23,8 @@ import {
 
 import { Button } from '@/components/ui/Button';
 import { Avatar } from '@/components/common/Avatar';
-import { canReview, useAuthStore } from '@/stores/authStore';
+import { NotificationBell } from '@/components/layout/NotificationBell';
+import { canAccessAdmin, useAuthStore } from '@/stores/authStore';
 
 const mainNav = [
   { href: '/', label: '首页', icon: Home },
@@ -39,6 +40,7 @@ function isActive(pathname: string, href: string): boolean {
 
 export function AppHeader() {
   const pathname = usePathname();
+  const router = useRouter();
   const { user, status, logout } = useAuthStore();
   const [menuPath, setMenuPath] = useState<string | null>(null);
   const menuOpen = menuPath === pathname;
@@ -110,6 +112,7 @@ export function AppHeader() {
           </Link>
           {authed ? (
             <>
+              <NotificationBell />
               <div className="relative" ref={menuRef}>
                 <button
                   type="button"
@@ -150,8 +153,8 @@ export function AppHeader() {
                     <MenuLink href="/me/follows" icon={BookOpen} label="我的关注" />
                     <MenuLink href="/me/notifications" icon={Bell} label="通知" />
                     <MenuLink href="/me/security" icon={UserCog} label="账号与安全" />
-                    {canReview(user) && (
-                      <MenuLink href="/admin/reviews" icon={ShieldCheck} label="审核后台" />
+                    {canAccessAdmin(user) && (
+                      <MenuLink href="/admin" icon={ShieldCheck} label="管理后台" />
                     )}
                     <button
                       type="button"
@@ -173,7 +176,8 @@ export function AppHeader() {
             <Button
               variant="primary"
               onClick={() => {
-                window.location.assign('/login');
+                const next = pathname === '/login' ? '/' : pathname + window.location.search;
+                router.push(`/login?next=${encodeURIComponent(next)}`);
               }}
             >
               登录

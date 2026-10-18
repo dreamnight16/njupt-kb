@@ -401,6 +401,7 @@ async def login(
     user_agent: str | None,
     client_ip: str | None,
     request_id: str | None,
+    otp: str | None = None,
 ) -> tuple[User, str, datetime]:
     normalized = _normalize_email(email)
 
@@ -439,6 +440,9 @@ async def login(
     if user.status in (AccountStatus.BANNED, AccountStatus.DELETED):
         raise Forbidden("账号当前不可用", details={"status": user.status})
 
+    from app.modules.identity.mfa import verify as verify_mfa
+    mfa_verified = await verify_mfa(db, user.id, otp)
+
     await ratelimit.reset_rate_limit(f"login:fail:{normalized}")
 
     raw = generate_token()
@@ -452,6 +456,7 @@ async def login(
         last_seen_at=now,
         user_agent=user_agent_value,
         client_ip=client_ip,
+        mfa_verified_at=now if mfa_verified else None,
     )
     db.add(session)
     await db.flush()
@@ -720,6 +725,12 @@ async def confirm_password_reset(
     record = await _consume_token(db, raw=token, purpose=AuthTokenPurpose.PASSWORD_RESET)
     user = await get_user(db, record.user_id)
     user.password_hash = hash_password(new_password)
+    from app.modules.identity.models import UserMFA
+    mfa_record = await db.get(UserMFA, user.id)
+    if mfa_record is not None:
+        # 邮箱找回不能移除验证器；旧恢复码失效，仍需原验证器才能登录。
+        mfa_record.recovery_hashes = []
+        mfa_record.revision += 1
     revoked = await revoke_all_sessions(db, user.id, reason="password_reset")
 
     await record_audit(
@@ -738,11 +749,13 @@ async def confirm_password_reset(
 
 
 async def me_summary(db: AsyncSession, *, user: User) -> MeResponse:
+    from app.core.permissions import effective_permissions
     profile = getattr(user, "profile", None)
     return MeResponse(
         id=user.id,
         email=user.email,
         role=user.role,
+        permissions=sorted(await effective_permissions(db, user)) if user.status == AccountStatus.ACTIVE else [],
         status=user.status,
         display_name=display_name_of(user),
         avatar_url=profile.avatar_url if profile else None,
@@ -914,6 +927,13 @@ async def delete_account(
     now = _now()
     user.status = AccountStatus.DELETED.value
     user.deleted_at = now
+    from app.modules.identity.models import UserMFA
+    mfa_record = await db.get(UserMFA, user.id)
+    if mfa_record is not None:
+        mfa_record.secret_ciphertext = None
+        mfa_record.enabled_at = None
+        mfa_record.recovery_hashes = []
+        mfa_record.revision += 1
 
     # 匿名化个人资料；邮箱保留在保留期内，故不改动 users.email。
     profile = getattr(user, "profile", None)

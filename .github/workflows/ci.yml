@@ -1,4 +1,4 @@
-name: beta checks
+name: release checks
 
 on:
   push:
@@ -21,6 +21,8 @@ jobs:
         working-directory: backend
       - run: python -m unittest discover -s tests -v
         working-directory: backend
+      - run: pip install pip-audit==2.10.1 && pip-audit --progress-spinner off
+        working-directory: backend
       - run: alembic upgrade head --sql > /tmp/beta-schema.sql
         working-directory: backend
   frontend:
@@ -37,4 +39,6 @@ jobs:
       - run: npm run lint
         working-directory: frontend
       - run: npm run build
+        working-directory: frontend
+      - run: npm run check:artifacts
         working-directory: frontend

@@ -62,7 +62,7 @@ __all__ = [
 # file.derive 与 content.derivatives.PROCESSOR_VERSION 保持一致，避免重复派生记录。
 PROCESSOR_VERSIONS: dict[JobType, str] = {
     JobType.FILE_SCAN: "scan/2",
-    JobType.FILE_DERIVE: "derive/2",
+    JobType.FILE_DERIVE: "derive/3",
     JobType.NOTIFICATION_DISPATCH: "notify/1",
     JobType.EVENT_FANOUT: "fanout/1",
     JobType.AI_PROCESS: "ai/1",

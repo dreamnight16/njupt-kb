@@ -9,12 +9,12 @@ import { Button } from '@/components/ui/Button';
 import { SkeletonList } from '@/components/ui/Skeleton';
 import { describeError } from '@/lib/api/client';
 import { getWorkbench } from '@/lib/api/admin';
-import { isAdmin, useAuthStore } from '@/stores/authStore';
+import { hasPermission, useAuthStore } from '@/stores/authStore';
 import { formatDateTime } from '@/lib/utils';
 
 export default function AdminWorkbenchPage() {
   const user = useAuthStore((s) => s.user);
-  return isAdmin(user) ? <Workbench /> : <Notice title="需要管理员权限" />;
+  return hasPermission(user, 'ops.view') ? <Workbench /> : <Notice title="需要管理员权限" />;
 }
 
 function Workbench() {

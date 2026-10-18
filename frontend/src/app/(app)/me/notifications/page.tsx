@@ -85,7 +85,13 @@ export default function NotificationsPage() {
                   ? `/requests/${req}`
                   : typeof res === "string" && isUuid(res)
                     ? `/resources/${res}`
-                    : null;
+                    : item.type === 'agreement_updated' || item.type === 'price_updated'
+                      ? '/me/agreements'
+                      : item.data?.case_id && typeof item.data.case_id === 'string' && isUuid(item.data.case_id)
+                        ? `/me/cases/${item.data.case_id}`
+                        : item.type === 'contributor_application_result'
+                          ? '/me/contributor-application'
+                          : item.type === 'assignment_changed' ? '/me' : null;
               return (
                 <li
                   key={item.id}

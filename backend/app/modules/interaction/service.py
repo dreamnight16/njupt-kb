@@ -39,7 +39,7 @@ from app.core.enums import (
 )
 from app.core.errors import Conflict, Forbidden, InvalidInput, NotFound
 from app.core.events import emit_event
-from app.core.permissions import COMMENT_MODERATE, has_permission
+from app.core.permissions import COMMENT_MODERATE, effective_permissions
 from app.core.pagination import (
     CursorPage,
     decode_cursor,
@@ -548,12 +548,13 @@ async def _comment_items(
     hidden = [c for c in comments if c.is_hidden and c.withdrawn_at is None]
     reasons = await _hide_reasons(db, [c.id for c in hidden]) if hidden else {}
     items: list[CommentItem] = []
+    can_moderate = viewer is not None and COMMENT_MODERATE in await effective_permissions(db, viewer)
     for comment in comments:
         user = users.get(comment.user_id)
         name = display_name_of(user) if user is not None else "已注销用户"
         moderation_reason = None
         if viewer is not None and comment.is_hidden and comment.withdrawn_at is None:
-            if viewer.id == comment.user_id or has_permission(viewer, COMMENT_MODERATE):
+            if viewer.id == comment.user_id or can_moderate:
                 moderation_reason = reasons.get(comment.id)
         items.append(
             CommentItem(

@@ -207,6 +207,29 @@ class Settings(BaseSettings):
     EVENT_REPLAY_MAX_ATTEMPTS: int = Field(default=5, ge=1)
     OPS_METRICS_ENABLED: bool = True
 
+    # --- beta16 统一搜索（§22）：建议、热词与查询日志 ---
+    # 查询日志只存归一化后的词与结果数，不存用户标识与原始输入，用于热词与零结果观测。
+    SEARCH_LOG_ENABLED: bool = True
+    SEARCH_QUERY_MAX_CHARS: int = Field(default=80, ge=8, le=120)
+    SEARCH_SUGGEST_LIMIT: int = Field(default=6, ge=1, le=20)
+    SEARCH_SUGGEST_MIN_CHARS: int = Field(default=1, ge=1, le=10)
+    SEARCH_HOT_WINDOW_DAYS: int = Field(default=7, ge=1, le=90)
+    SEARCH_HOT_LIMIT: int = Field(default=10, ge=1, le=50)
+    SEARCH_LOG_RETENTION_DAYS: int = Field(default=90, ge=1)
+
+    # --- beta16 管理端分析（§43、§45）与审计导出（§44）---
+    # 窗口上限与导出上限都是可调默认值；分析只读聚合，导出必写审计并受行数上限约束。
+    ANALYTICS_DEFAULT_WINDOW_DAYS: int = Field(default=14, ge=1, le=90)
+    ANALYTICS_MAX_WINDOW_DAYS: int = Field(default=90, ge=1, le=365)
+    AUDIT_EXPORT_MAX_ROWS: int = Field(default=5000, ge=1, le=20000)
+
+    # --- beta16 通知实时流（§33；buchong 实时推送待办）---
+    # SSE 只推「有新通知/未读数变化」的轻量信号，正文仍由受权接口拉取；连接数上限为进程内计数。
+    NOTIFICATION_STREAM_ENABLED: bool = True
+    NOTIFICATION_STREAM_HEARTBEAT_SECONDS: int = Field(default=25, ge=5, le=60)
+    NOTIFICATION_STREAM_MAX_SECONDS: int = Field(default=300, ge=10, le=1800)
+    NOTIFICATION_STREAM_MAX_CONNECTIONS: int = Field(default=500, ge=1)
+
     # --- 邮件（§21：仅用于验证与找回密码）---
     MAIL_ENABLED: bool = False
     MAIL_FROM: str = "no-reply@example.com"
@@ -220,6 +243,14 @@ class Settings(BaseSettings):
     JOB_MAX_ATTEMPTS: int = 5
     JOB_LEASE_SECONDS: int = 600
     JOB_SCAN_INTERVAL_SECONDS: int = 30
+    # 保留期政策未确认时不自动删除；启用后每日执行现有账号与搜索日志清理。
+    RETENTION_SCHEDULE_ENABLED: bool = False
+    # Fernet 独立随机密钥；不从登录密码派生，也不复用可临时生成的开发 SECRET_KEY。
+    MFA_ENCRYPTION_KEY: str = ""
+    MFA_REAUTH_MAX_AGE_SECONDS: int = Field(default=600, ge=60, le=3600)
+    RATE_LIMIT_MFA: dict[str, int] = {
+        "anon": 5, "user": 5, "contributor": 5, "reviewer": 5, "admin": 5,
+    }
 
     # --- 幂等（§25.1：首期建议至少 24 小时）---
     IDEMPOTENCY_TTL_HOURS: int = 24

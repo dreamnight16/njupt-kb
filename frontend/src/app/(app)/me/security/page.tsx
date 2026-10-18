@@ -1,5 +1,7 @@
 'use client';
 
+import { MfaPanel } from '@/components/workspace/MfaPanel';
+
 import { useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
@@ -154,6 +156,7 @@ export default function SecurityPage() {
 
   return (
     <div className="space-y-8">
+      <MfaPanel />
       <section aria-labelledby="verify-status" className="border border-divider bg-surface p-6">
         <h2 id="verify-status" className="dn-display text-2xl">
           验证状态

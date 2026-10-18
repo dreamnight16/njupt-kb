@@ -312,17 +312,26 @@ async def submit_application(
     if not allowed:
         raise RateLimited("入驻申请提交过于频繁，请稍后再试")
 
+    from app.modules.identity.models import User
+
+    user = await db.scalar(
+        select(User).where(User.id == user.id).with_for_update()
+        .execution_options(populate_existing=True)
+    )
+    if user is None or user.status != AccountStatus.ACTIVE:
+        raise Forbidden("当前账号不能提交入驻申请")
+
     # 已是贡献者或管理员：无需重复入驻。
     if user.role in (Role.CONTRIBUTOR, Role.ADMIN):
         raise Conflict("你已是贡献者或管理员，无需重复申请", code="ALREADY_ONBOARDED")
     active = await db.scalar(
         select(ContributorApplication.id).where(
             ContributorApplication.user_id == user.id,
-            ContributorApplication.status == ContributorOnboardingStatus.ACTIVE.value,
+            ContributorApplication.status.in_(["active", "suspended"]),
         )
     )
     if active is not None:
-        raise Conflict("你已是入驻贡献者，无需重复申请", code="ALREADY_ONBOARDED")
+        raise Conflict("已有入驻身份，请在原记录处理恢复或退出", code="ALREADY_ONBOARDED")
 
     open_count = await db.scalar(
         select(func.count())
@@ -497,6 +506,93 @@ async def _promote_to_contributor(db: AsyncSession, user_id: uuid.UUID) -> str |
         user.role = Role.CONTRIBUTOR.value
         await db.flush()
     return str(user.role)
+
+
+async def change_contributor_status(
+    db: AsyncSession,
+    *,
+    application_id: uuid.UUID,
+    actor: "User",
+    expected_status: str,
+    status: str,
+    reason: str,
+    request_id: str,
+    self_exit: bool = False,
+) -> ContributorApplication:
+    """暂停、恢复或退出专业身份；合同、收益及本人内容归属独立保留。"""
+    from app.core.permissions import CONTRIBUTOR_REVIEW, effective_permissions
+    from app.modules.assignment.service import revoke_resource_assignment
+    from app.modules.assignment.models import ResourceAssignment
+    from app.modules.identity.models import User
+
+    application = await db.get(ContributorApplication, application_id)
+    if application is None or (self_exit and application.user_id != actor.id):
+        raise NotFound("入驻记录不存在")
+    if self_exit:
+        if status != ContributorOnboardingStatus.EXITED:
+            raise Forbidden("本人仅可申请退出专业身份")
+    elif CONTRIBUTOR_REVIEW not in await effective_permissions(db, actor):
+        raise Forbidden("需要入驻管理权限")
+    reason = reason.strip()
+    if not reason or len(reason) > 255:
+        raise InvalidInput("变更理由须为 1–255 字")
+    allowed = {
+        "active": {"suspended", "exited"},
+        "suspended": {"active", "exited"},
+    }
+    if status not in allowed.get(expected_status, set()):
+        raise Conflict("不允许的专业身份流转", code="INVALID_ONBOARDING_TRANSITION")
+
+    # 与入驻申请共用用户行锁，防止退出和重新申请交错生成两份有效身份。
+    target_user = await db.scalar(
+        select(User).where(User.id == application.user_id).with_for_update()
+        .execution_options(populate_existing=True)
+    )
+    if target_user is None or target_user.status != AccountStatus.ACTIVE:
+        raise Conflict("账号当前不可变更专业身份")
+    now = _now()
+    result = await db.execute(
+        update(ContributorApplication)
+        .where(ContributorApplication.id == application_id,
+               ContributorApplication.status == expected_status)
+        .values(status=status, decided_at=now, decided_by=actor.id,
+                decision_reason=reason, closed_at=now)
+        .execution_options(synchronize_session=False)
+    )
+    if result.rowcount != 1:
+        raise Conflict("专业身份已变化，请刷新重试", code="ONBOARDING_STATE_CHANGED")
+    await db.refresh(application)
+
+    if status == ContributorOnboardingStatus.ACTIVE:
+        await _promote_to_contributor(db, target_user.id)
+    else:
+        if target_user.role == Role.CONTRIBUTOR:
+            target_user.role = Role.USER.value
+        assignments = list((await db.scalars(
+            select(ResourceAssignment).where(
+                ResourceAssignment.user_id == target_user.id,
+                ResourceAssignment.revoked_at.is_(None),
+            ).order_by(ResourceAssignment.id)
+        )).all())
+        for assignment in assignments:
+            await revoke_resource_assignment(
+                db, actor=actor, assignment_id=assignment.id, reason=reason,
+                request_id=request_id,
+            )
+    await record_audit(
+        db, action="contributor.status_changed", object_type="contributor_application",
+        object_id=application_id, actor_id=actor.id,
+        before={"status": expected_status}, after={"status": status},
+        reason=reason, request_id=request_id,
+    )
+    await emit_event(
+        db, event_type=DomainEventType.CONTRIBUTOR_APPLICATION_DECIDED,
+        subject_type="contributor_application", subject_id=application_id,
+        payload={"application_id": str(application_id), "user_id": str(target_user.id),
+                 "status": status, "decision": status, "decided_by": str(actor.id)},
+        dedupe_key=f"contributor-status:{application_id}:{uuid.uuid4()}",
+    )
+    return application
 
 
 async def onboarding_status(db: AsyncSession, user_id: uuid.UUID) -> str | None:

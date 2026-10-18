@@ -7,18 +7,20 @@
 
 from __future__ import annotations
 
+from datetime import datetime
 from typing import TYPE_CHECKING
 
-from fastapi import APIRouter, Depends, Query
+from fastapi import APIRouter, Depends, Query, Response
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.core.deps import get_db, get_current_user
+from app.core.deps import get_db, get_current_user, get_request_id
 from app.core.enums import AccountStatus, Role
 from app.core.pagination import CursorPage
 from app.core.permissions import AUDIT_VIEW, METRICS_VIEW, OPS_VIEW, USER_SUSPEND, require
-from app.modules.ops import accounts, personal
+from app.modules.ops import accounts, analytics, audit_export, personal
 from app.modules.ops import service
 from app.modules.ops.schemas import (
+    AnalyticsOverviewOut,
     MetricsOut,
     OpsAlertsOut,
     SecurityOverviewOut,
@@ -64,6 +66,54 @@ async def get_metrics(
 ) -> MetricsOut:
     """只读 SLO 指标：连接池预算、缓存统计、事件/任务积压与慢查询阈值（高并发专项 §13）。"""
     return await service.metrics_summary(db)
+
+
+@router.get("/admin/analytics/overview", response_model=AnalyticsOverviewOut)
+async def get_analytics_overview(
+    days: int | None = Query(None, description="统计窗口天数，越界由服务层报 InvalidInput"),
+    user: "User" = Depends(require(METRICS_VIEW)),
+    db: AsyncSession = Depends(get_db),
+) -> AnalyticsOverviewOut:
+    """管理端数据分析总览：按 UTC 自然日分桶的产品/运营指标（§43）。
+
+    只读聚合，每个指标一条 GROUP BY 查询；空日期补零，查询数与窗口长度无关。
+    """
+    return await analytics.analytics_overview(db, days=days)
+
+
+@router.get("/admin/audit/export")
+async def export_audit(
+    from_at: datetime | None = Query(None, alias="from", description="起始时间（ISO 8601）"),
+    to_at: datetime | None = Query(None, alias="to", description="结束时间（ISO 8601）"),
+    action: str | None = Query(None, max_length=80, description="动作前缀匹配，如 review."),
+    limit: int | None = Query(None, description="导出上限，超过服务端上限按上限截断"),
+    user: "User" = Depends(require(AUDIT_VIEW)),
+    db: AsyncSession = Depends(get_db),
+    request_id: str = Depends(get_request_id),
+) -> Response:
+    """导出审计元数据 CSV（§44）：不含 before/after 原始 JSON 与任何凭据字段。
+
+    默认最近 7 天；超过 ``AUDIT_EXPORT_MAX_ROWS`` 时截断并返回
+    ``X-Export-Truncated: true``；导出动作本身写一条 ``audit.export`` 审计。
+    """
+    result = await audit_export.export_audit_csv(
+        db,
+        actor_id=user.id,
+        from_at=from_at,
+        to_at=to_at,
+        action=action,
+        limit=limit,
+        request_id=request_id,
+    )
+    return Response(
+        content=result.content,
+        media_type="text/csv; charset=utf-8",
+        headers={
+            "Content-Disposition": f'attachment; filename="{result.filename}"',
+            "X-Export-Truncated": "true" if result.truncated else "false",
+            "X-Export-Rows": str(result.row_count),
+        },
+    )
 
 
 @router.get("/me/overview", response_model=personal.PersonalOverview)

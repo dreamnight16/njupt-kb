@@ -68,6 +68,15 @@ class ReviewDecisionIn(BaseModel):
     snapshot_revision: int = Field(ge=1)
 
 
+class PublicationCandidateOut(BaseModel):
+    review_id: uuid.UUID
+    resource_id: uuid.UUID
+    version_id: uuid.UUID
+    title: str
+    expected_revision: int
+    reviewed_at: datetime | None
+
+
 class ModerationDecisionOut(_ORMModel):
     id: uuid.UUID
     review_id: uuid.UUID

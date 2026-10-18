@@ -6,6 +6,7 @@
  * 金额以整数分表示。取值与 app/core/enums.py 一致。
  */
 import { api } from './client';
+import type { CursorPage } from './types';
 
 export type AgreementState =
   | 'draft'
@@ -53,4 +54,40 @@ export interface AgreementDetailOut {
 export async function listMyAgreements(): Promise<AgreementDetailOut[]> {
   const { data } = await api.get<AgreementDetailOut[]>('/me/agreements');
   return data;
+}
+
+export async function acceptAgreement(version: AgreementVersionOut): Promise<void> {
+  await api.post(`/agreements/${version.id}/acceptances`, { accepted_hash: version.terms_hash }, {
+    headers: { 'Idempotency-Key': `agreement:${version.id}:${version.terms_hash}` },
+  });
+}
+
+export interface PriceProposalOut {
+  id: string;
+  product_id: string;
+  contributor_party_id: string | null;
+  version_no: number;
+  suggested_fen: number;
+  final_fen: number | null;
+  agreement_version_id: string | null;
+  state: 'proposed' | 'negotiating' | 'confirmed' | 'published' | 'withdrawn';
+  proposal_hash: string;
+  created_at: string;
+}
+
+export async function listPriceProposals(admin: boolean, cursor: string | null): Promise<CursorPage<PriceProposalOut>> {
+  return (await api.get<CursorPage<PriceProposalOut>>(admin ? '/admin/price-proposals' : '/me/price-proposals', {
+    params: { cursor: cursor || undefined },
+  })).data;
+}
+
+export async function confirmPrice(proposal: PriceProposalOut, admin: boolean): Promise<void> {
+  const prefix = admin ? '/admin' : '';
+  await api.post(`${prefix}/price-proposals/${proposal.id}/acceptances`, {
+    accepted_hash: proposal.proposal_hash,
+  }, { headers: { 'Idempotency-Key': `price:${proposal.id}:${proposal.proposal_hash}` } });
+}
+
+export async function rejectPrice(proposalId: string, reason: string): Promise<void> {
+  await api.post(`/price-proposals/${proposalId}/rejections`, { reason });
 }

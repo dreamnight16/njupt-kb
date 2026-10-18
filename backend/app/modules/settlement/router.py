@@ -166,6 +166,15 @@ async def create_payout_attempt(
     )
 
 
+@router.get("/admin/payouts/{payout_id}/attempts", response_model=CursorPage[PayoutAttemptOut])
+async def list_payout_attempts(
+    payout_id: uuid.UUID, limit: int | None = Query(default=None, ge=1, le=100),
+    cursor: str | None = None, actor: "User" = Depends(require(PAYOUT_MANAGE)),
+    db: AsyncSession = Depends(get_db),
+) -> CursorPage[PayoutAttemptOut]:
+    return await service.list_payout_attempts(db, payout_id=payout_id, limit=limit, cursor=cursor)
+
+
 @router.post("/admin/payout-attempts/{attempt_id}/reconcile", response_model=PayoutAttemptOut)
 async def reconcile_payout_attempt(
     attempt_id: uuid.UUID,

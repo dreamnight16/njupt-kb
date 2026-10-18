@@ -11,7 +11,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.audit import record_audit
 from app.core.enums import AccountStatus
 from app.core.errors import Conflict, Forbidden, InvalidInput, NotFound
-from app.core.permissions import COMMENT_MODERATE, has_permission
+from app.core.permissions import COMMENT_MODERATE, effective_permissions
 from app.modules.interaction.models import Comment
 from app.modules.interaction.schemas import CommentItem
 from app.modules.interaction.service import _comment_items, assert_comment_resource, comment_status
@@ -63,7 +63,7 @@ async def manage_comment(
     """
     if user.status != AccountStatus.ACTIVE:
         raise Forbidden("当前账号不能执行此操作")
-    if hidden is not None and enforce_permission and not has_permission(user, COMMENT_MODERATE):
+    if hidden is not None and enforce_permission and COMMENT_MODERATE not in await effective_permissions(db, user):
         raise Forbidden("需要评论管理权限")
     if hidden is not None:
         reason = (reason or "").strip()

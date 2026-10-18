@@ -111,6 +111,8 @@ async def create_permission_assignment(
     from app.modules.identity.service import get_user
 
     target = await get_user(db, payload.user_id)  # 找不到抛 NotFound
+    from app.modules.identity.models import User
+    await db.execute(select(User.id).where(User.id == target.id).with_for_update())
 
     # 表上 `(user_id, permission)` 唯一且覆盖已撤销记录，因此复用同一行重新授权，
     # 而不是插入新行：既避免唯一冲突，也保留完整的授权—撤销历史（§15.2 授权与撤销审计）。
@@ -135,9 +137,10 @@ async def create_permission_assignment(
             "revoked_at": row.revoked_at.isoformat() if row.revoked_at else None,
         }
 
-    row.scope = _as_str(payload.scope)
-    row.scope_catalog_id = payload.scope_catalog_id
-    row.scope_resource_id = payload.scope_resource_id
+    # 0.0.2 用户决定：后台职责覆盖全站；旧范围记录不自动升级，须显式重新授予。
+    row.scope = "global"
+    row.scope_catalog_id = None
+    row.scope_resource_id = None
     row.valid_until = payload.valid_until
     row.granted_by = actor.id
     row.reason = payload.reason
@@ -274,6 +277,9 @@ async def create_resource_assignment(
     from app.modules.identity.service import get_user
 
     target = await get_user(db, payload.user_id)
+    from app.modules.identity.models import User
+    # 与专业身份暂停/退出共用用户锁，串行处理同一账号的分配创建。
+    await db.execute(select(User.id).where(User.id == target.id).with_for_update())
 
     if payload.resource_id is not None:
         from app.modules.content.models import Resource
@@ -437,6 +443,9 @@ async def my_assignments(db: AsyncSession, *, user) -> MyAssignmentsOut:
             await db.execute(
                 select(AdminPermissionAssignment).where(
                     AdminPermissionAssignment.user_id == user.id,
+                    AdminPermissionAssignment.scope == "global",
+                    AdminPermissionAssignment.scope_catalog_id.is_(None),
+                    AdminPermissionAssignment.scope_resource_id.is_(None),
                     AdminPermissionAssignment.revoked_at.is_(None),
                     or_(
                         AdminPermissionAssignment.valid_until.is_(None),

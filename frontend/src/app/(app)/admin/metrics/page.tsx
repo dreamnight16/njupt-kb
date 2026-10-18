@@ -10,11 +10,11 @@ import { SkeletonCard, SkeletonList } from '@/components/ui/Skeleton';
 import { fetchMetrics } from '@/lib/api/admin';
 import { describeError } from '@/lib/api/client';
 import { formatDateTime } from '@/lib/utils';
-import { isAdmin, useAuthStore } from '@/stores/authStore';
+import { hasPermission, useAuthStore } from '@/stores/authStore';
 
 export default function AdminMetricsPage() {
   const user = useAuthStore((s) => s.user);
-  return isAdmin(user) ? <MetricsOverview /> : <Notice title="需要管理员权限" />;
+  return hasPermission(user, 'metrics.view') ? <MetricsOverview /> : <Notice title="需要管理员权限" />;
 }
 
 function MetricsOverview() {

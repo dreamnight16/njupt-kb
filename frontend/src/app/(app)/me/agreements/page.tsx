@@ -1,6 +1,8 @@
 'use client';
 
-import { useQuery } from '@tanstack/react-query';
+import { useState } from 'react';
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import toast from 'react-hot-toast';
 
 import { Notice } from '@/components/common/Notice';
 import { Badge } from '@/components/ui/Badge';
@@ -16,6 +18,9 @@ import {
 } from '@/lib/api/licensing';
 import { formatDateTime } from '@/lib/utils';
 import { useAuthStore } from '@/stores/authStore';
+import { fetchFeatures } from '@/lib/api/features';
+import { acceptAgreement } from '@/lib/api/licensing';
+import { PriceProposals } from '@/components/workspace/PriceProposals';
 
 const stateTone: Record<AgreementState, 'gray' | 'yellow' | 'green' | 'orange' | 'red'> = {
   draft: 'gray',
@@ -68,7 +73,7 @@ export default function MyAgreementsPage() {
           </Notice>
         )
       ) : (query.data?.length ?? 0) === 0 ? (
-        <NotEnabled />
+        <Notice title="暂无协议">本人参与的协议与历史版本会显示在这里。</Notice>
       ) : (
         <ul className="space-y-4">
           {query.data?.map((agreement) => (
@@ -76,6 +81,7 @@ export default function MyAgreementsPage() {
           ))}
         </ul>
       )}
+      <PriceProposals />
     </div>
   );
 }
@@ -115,6 +121,17 @@ function AgreementItem({ agreement }: { agreement: AgreementDetailOut }) {
 }
 
 function VersionItem({ version }: { version: AgreementVersionOut }) {
+  const client = useQueryClient();
+  const [checked, setChecked] = useState(false);
+  const features = useQuery({ queryKey: ['features'], queryFn: fetchFeatures });
+  const mutation = useMutation({
+    mutationFn: () => acceptAgreement(version),
+    onSuccess: () => {
+      toast.success('已记录本版本确认');
+      client.invalidateQueries({ queryKey: ['my-agreements'] });
+    },
+    onError: error => toast.error(describeError(error).message),
+  });
   const scopeEntries = Object.entries(version.rights_scope);
   return (
     <li className="space-y-1 border border-divider bg-canvas p-3 text-sm">
@@ -144,6 +161,15 @@ function VersionItem({ version }: { version: AgreementVersionOut }) {
             </div>
           ))}
         </dl>
+      )}
+      {features.data?.commerce_enabled && version.state === 'awaiting_acceptance' && (
+        <div className="space-y-2 border-t border-divider pt-2">
+          <label className="flex min-h-11 items-center gap-2 text-sm">
+            <input type="checkbox" checked={checked} onChange={event => setChecked(event.target.checked)} />
+            已核对收到的完整协议、附件及本版本条款哈希
+          </label>
+          <Button disabled={!checked} isLoading={mutation.isPending} onClick={() => mutation.mutate()}>确认此协议版本</Button>
+        </div>
       )}
     </li>
   );

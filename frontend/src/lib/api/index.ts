@@ -18,6 +18,8 @@ export * as creatorApi from './creator';
 export * as accessApi from './access';
 export * as interactionApi from './interaction';
 export * as notificationApi from './notification';
+export * as searchApi from './search';
+export * as analyticsApi from './analytics';
 export * as moderationApi from './moderation';
 export * as adminApi from './admin';
 export * as casesApi from './cases';

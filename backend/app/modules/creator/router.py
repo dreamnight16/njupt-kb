@@ -23,6 +23,7 @@ from app.modules.creator.schemas import (
     ContributorApplicationCreate,
     ContributorApplicationDecisionIn,
     ContributorApplicationOut,
+    ContributorLifecycleIn,
     CreatorLedgerEntryOut,
     CreatorProfileOut,
     CreatorProfileUpdate,
@@ -139,6 +140,34 @@ async def decide_contributor_application(
         request_id=request_id,
     )
     return ContributorApplicationOut.model_validate(application)
+
+
+@router.post("/admin/contributor-applications/{application_id}/status",
+             response_model=ContributorApplicationOut)
+async def change_contributor_status(
+    application_id: uuid.UUID, body: ContributorLifecycleIn,
+    user=Depends(require(CONTRIBUTOR_REVIEW)), db: AsyncSession = Depends(get_db),
+    request_id: str = Depends(get_request_id),
+) -> ContributorApplicationOut:
+    result = await service.change_contributor_status(
+        db, application_id=application_id, actor=user, **body.model_dump(),
+        request_id=request_id,
+    )
+    return ContributorApplicationOut.model_validate(result)
+
+
+@router.post("/me/contributor-applications/{application_id}/exit",
+             response_model=ContributorApplicationOut)
+async def exit_contributor(
+    application_id: uuid.UUID, body: ContributorLifecycleIn,
+    user=Depends(get_current_user), db: AsyncSession = Depends(get_db),
+    request_id: str = Depends(get_request_id),
+) -> ContributorApplicationOut:
+    result = await service.change_contributor_status(
+        db, application_id=application_id, actor=user, **body.model_dump(),
+        request_id=request_id, self_exit=True,
+    )
+    return ContributorApplicationOut.model_validate(result)
 
 
 @router.get("/me/contributions", response_model=CursorPage[ContributionOut])

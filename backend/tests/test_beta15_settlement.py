@@ -41,7 +41,6 @@ from app.modules.identity.models import User
 from app.modules.settlement import service as settlement
 from app.modules.settlement.models import (
     Payout,
-    PayoutAttempt,
     RecoveryClaim,
     SettlementItem,
     SettlementStatement,
@@ -384,6 +383,17 @@ class SettlementTests(unittest.IsolatedAsyncioTestCase):
         pending = await settlement.reconcile_pending_payouts(self.db)
         self.assertEqual(len(pending), 1)
         self.assertTrue(pending[0]["requires_manual_reconciliation"])
+
+        # 查明后在原尝试上收口，不能另建转账来绕过不确定状态。
+        attempts = await settlement.list_payout_attempts(self.db, payout_id=payout.id, limit=None, cursor=None)
+        self.assertEqual([row.id for row in attempts.items], [attempt_out.id])
+        result = await settlement.reconcile_payout_attempt(
+            self.db, actor=self.admin, attempt_id=attempt_out.id,
+            payload=PayoutReconcileIn(result="succeeded", evidence_ref="核实回单", external_ref_key="UNCERTAIN-RESOLVED"),
+            request_id="t",
+        )
+        self.assertEqual(result.state, "succeeded")
+        self.assertEqual(await settlement.reconcile_pending_payouts(self.db), [])
 
     # --- T23：真实转出唯一键不重复付款 ----------------------------------------
     async def test_t23_duplicate_external_reference_rejected(self):

@@ -73,9 +73,6 @@ export interface PermissionAssignmentOut {
 export interface PermissionAssignmentCreate {
   user_id: string;
   permission: string;
-  scope?: AdminPermissionScope;
-  scope_catalog_id?: string | null;
-  scope_resource_id?: string | null;
   valid_until?: string | null;
   reason: string;
 }

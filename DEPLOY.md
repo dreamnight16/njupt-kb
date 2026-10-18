@@ -1,5 +1,23 @@
 # 南邮知识库 — 生产部署指南
 
+## 0.0.2 升级补充（当前）
+
+本次只完成本地代码发布；此节是部署步骤，不是部署记录。详细证据及门槛见 [0.0.2 发布记录](docs/RELEASE_0.0.2.md)。
+
+1. 备份数据库、私有对象、配置及独立 MFA 密钥。核对旧 `derive/2` 任务/重试与历史派生，勿把新库测试当旧库升级。
+2. 安装新的后端依赖与前端锁文件，执行一次 `alembic upgrade head` 到 **`0013_v002_mfa`**，然后再启动新 API/Worker。后端 Docker 上下文现包含迁移版本脚本。
+3. 在未入库的 `.env` 配置 `MFA_ENCRYPTION_KEY`。可在可信本地环境执行 `python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"` 生成；不要把输出写入仓库/日志。该密钥须独立备份，丢失后不能解密种子。
+4. 管理人员先在账号安全页绑定验证器并离线保存一次性恢复码，再执行受近期认证保护的敏感操作。找回密码不清除 MFA；不提供仅凭邮箱移除管理员 MFA 的入口。
+5. 默认 Worker 消费全部新队列。需隔离时使用 `docker compose -f docker-compose.prod.yml -f docker-compose.workers.yml up -d`；AI profile 和模型调用开关分别控制，不能因启动 Worker 就默认允许外发。
+6. 保留 `COMMERCE_ENABLED=false`、合规门槛关闭与 `AI_ENABLED=false`。保留政策未确认时保持 `RETENTION_SCHEDULE_ENABLED=false`。
+7. 检查旧范围权限：它们保留但不生效，必须核对后显式重新授予全站职责；课程/资料维护仍走对象分配。切勿批量把旧范围授权自动转为全站授权。
+
+数据库工具：`python scripts/database_backup.py backup <备份路径.dump>`；恢复到事先创建的独立空库时，设置目标 `DATABASE_URL`，执行 `python scripts/database_backup.py restore <备份路径.dump> --confirm-database <目标库名>`。工具校验备份大小和哈希、单事务恢复、不使用 `--clean`，也不重放外部付款。对象存储、密钥与数据库须共同制定恢复点并演练；本机只测试了工具逻辑。
+
+`0013` 降级前须经已认证流程禁用已启用 MFA；`0012` 的新枚举记录需先核对，禁止为了收窄约束直接删除业务或审计事实。真实 PostgreSQL 并发、MinIO/ClamAV/Celery、Office 转换、撤权传播、TLS/WAF 与故障恢复仍需部署环境验收。
+
+下方 beta11/beta3 为历史补充，不覆盖本节的版本、迁移及权限决定。
+
 ## beta11 升级补充
 
 升级前执行 `alembic upgrade head`，当前迁移链到 `0008_beta11_ratelimit`。API 启动依赖新增计数表，不能先启动新应用再补迁移。

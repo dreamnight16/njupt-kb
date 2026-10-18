@@ -141,6 +141,7 @@ async def login(
         db,
         email=payload.email,
         password=payload.password,
+        otp=payload.otp,
         user_agent=request.headers.get("User-Agent"),
         client_ip=get_client_ip(request),
         request_id=request_id,

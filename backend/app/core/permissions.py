@@ -18,6 +18,8 @@ from collections.abc import Callable
 from datetime import datetime, timezone
 from typing import TYPE_CHECKING
 
+from fastapi import Request
+
 from sqlalchemy import or_, select
 
 from app.core.enums import AccountStatus, Role
@@ -144,6 +146,9 @@ async def effective_permissions(db: "AsyncSession", user: "User") -> frozenset[s
             await db.execute(
                 select(AdminPermissionAssignment.permission).where(
                     AdminPermissionAssignment.user_id == user.id,
+                    AdminPermissionAssignment.scope == "global",
+                    AdminPermissionAssignment.scope_catalog_id.is_(None),
+                    AdminPermissionAssignment.scope_resource_id.is_(None),
                     AdminPermissionAssignment.revoked_at.is_(None),
                     or_(
                         AdminPermissionAssignment.valid_until.is_(None),
@@ -171,9 +176,10 @@ def require(*permissions: str) -> Callable[[object], object]:
     """
     from fastapi import Depends
 
-    from app.core.deps import get_current_user, get_db
+    from app.core.deps import get_current_user, get_current_session, get_db
 
     async def _dependency(
+        request: Request,
         user: "User" = Depends(get_current_user),
         db: "AsyncSession" = Depends(get_db),
     ) -> "User":
@@ -183,6 +189,13 @@ def require(*permissions: str) -> Callable[[object], object]:
         missing = [p for p in permissions if p not in granted]
         if missing:
             raise Forbidden("没有执行该操作的权限", details={"missing": missing})
+        from app.config import settings
+        sensitive = {ASSIGNMENT_MANAGE, USER_SUSPEND, ENTITLEMENT_GRANT, RESOURCE_PUBLISH,
+                     AGREEMENT_MANAGE, PRICE_CONFIRM, SETTLEMENT_MANAGE, PAYOUT_MANAGE}
+        if settings.is_prod and request.method in {"POST", "PUT", "PATCH", "DELETE"} and sensitive.intersection(permissions):
+            from app.modules.identity.mfa import require_recent
+            session = await get_current_session(request, db=db)
+            await require_recent(db, user, session)
         return user
 
     return _dependency

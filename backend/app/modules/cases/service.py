@@ -102,6 +102,25 @@ _ACTIVE_GRANT_STATUSES = (GrantStatus.ISSUED.value, GrantStatus.CONSUMED.value)
 # 未关闭案件判定：除 CLOSED 外的所有状态都计入上限（§14.1）。
 _OPEN_STATES = tuple(s.value for s in CaseStatus if s != CaseStatus.CLOSED)
 
+# 案件事件 -> 侵权通知状态（§13.3 状态联动）。
+# 通知枚举没有「处理中」字面值：`FORWARDED`（已转送、进入处理）是唯一的进行中状态，
+# 因此只在案件实际转送时推进；受理（TRIAGED）不等于转送，不移动通知状态。
+_CASE_EVENT_NOTICE_STATUS = {
+    CaseEventType.FORWARDED.value: RightsNoticeStatus.FORWARDED,
+    CaseEventType.DECIDED.value: RightsNoticeStatus.MEASURED,
+    CaseEventType.CLOSED.value: RightsNoticeStatus.CLOSED,
+}
+
+# 通知状态的前进次序：只前进不回退，已是终态不覆盖（幂等）。
+_RIGHTS_NOTICE_ORDER = {
+    RightsNoticeStatus.RECEIVED.value: 0,
+    RightsNoticeStatus.NEEDS_INFO.value: 1,
+    RightsNoticeStatus.FORWARDED.value: 2,
+    RightsNoticeStatus.COUNTER_RECEIVED.value: 3,
+    RightsNoticeStatus.MEASURED.value: 4,
+    RightsNoticeStatus.CLOSED.value: 5,
+}
+
 
 def _now() -> datetime:
     return datetime.now(timezone.utc)
@@ -643,6 +662,47 @@ async def list_admin_cases(
     )
 
 
+async def _sync_rights_notice_status(
+    db: AsyncSession, *, case: Case, event_type, actor: "User", request_id: str | None
+) -> None:
+    """案件事件联动侵权通知状态（§13.3）。
+
+    只做**工单进度联动**，不自动作出法律结论：通知状态仅反映所处阶段，
+    「已决定」不等于认定侵权成立，结论与责任仍由受理人员按程序作出。
+
+    约束：
+    - 案件未关联通知（`rights_notices.case_id` 无对应行）时静默跳过；
+    - 状态只前进不回退，已是终态不覆盖（幂等）；
+    - 联动时间由 `updated_at` 与审计行共同留痕。
+    """
+    target = _CASE_EVENT_NOTICE_STATUS.get(str(event_type))
+    if target is None:
+        return
+    notice = await db.scalar(
+        select(RightsNotice).where(RightsNotice.case_id == case.id).limit(1)
+    )
+    if notice is None:
+        return
+    previous = notice.status
+    current_rank = _RIGHTS_NOTICE_ORDER.get(previous)
+    if current_rank is None or _RIGHTS_NOTICE_ORDER[target.value] <= current_rank:
+        return
+
+    notice.status = target.value
+    await db.flush()
+    await record_audit(
+        db,
+        action="rights_notice.status_synced",
+        object_type="rights_notice",
+        object_id=notice.id,
+        actor_id=actor.id,
+        before={"status": previous},
+        after={"status": notice.status, "case_event": str(event_type)},
+        reason="案件事件联动通知进度（不代表侵权认定）",
+        request_id=request_id,
+    )
+
+
 async def append_case_event(
     db: AsyncSession,
     *,
@@ -651,7 +711,11 @@ async def append_case_event(
     payload,
     request_id: str,
 ) -> CaseEvent:
-    """后台追加案件事件并推进状态（§16.3）。reason 必填，NOTE 不改状态。"""
+    """后台追加案件事件并推进状态（§16.3）。reason 必填，NOTE 不改状态。
+
+    若案件关联了侵权通知，同时按 `_CASE_EVENT_NOTICE_STATUS` 联动通知状态；
+    联动只表示工单进度，**不等于认定侵权成立**。
+    """
     case = await db.get(Case, case_id)
     if case is None:
         raise NotFound("案件不存在")
@@ -694,6 +758,10 @@ async def append_case_event(
         if case.handler_id is None:
             case.handler_id = actor.id
     # NOTE：仅追加记录，不改状态。
+
+    await _sync_rights_notice_status(
+        db, case=case, event_type=payload.event_type, actor=actor, request_id=request_id
+    )
 
     await emit_event(
         db,

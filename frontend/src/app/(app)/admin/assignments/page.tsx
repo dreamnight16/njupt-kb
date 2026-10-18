@@ -21,13 +21,12 @@ import {
   listResourceAssignments,
   revokePermissionAssignment,
   revokeResourceAssignment,
-  type AdminPermissionScope,
   type AssignmentCapability,
   type PermissionAssignmentOut,
   type ResourceAssignmentOut,
 } from '@/lib/api/assignment';
 import { formatDateTime, isUuid } from '@/lib/utils';
-import { isAdmin, useAuthStore } from '@/stores/authStore';
+import { hasPermission, useAuthStore } from '@/stores/authStore';
 
 const textareaClass =
   'mt-1 min-h-11 w-full border border-control-border bg-surface px-3 py-2 text-sm text-text-primary focus:border-brand focus:outline-2 focus:outline-offset-1 focus:outline-focus';
@@ -37,7 +36,7 @@ const selectClass =
 
 export default function AdminAssignmentsPage() {
   const user = useAuthStore((s) => s.user);
-  if (!isAdmin(user)) return <Notice title="需要管理员权限" />;
+  if (!hasPermission(user, 'assignment.manage')) return <Notice title="需要管理员权限" />;
   return (
     <div className="space-y-10">
       <PermissionPanel />
@@ -54,9 +53,6 @@ function PermissionPanel() {
   const queryClient = useQueryClient();
   const [userId, setUserId] = useState('');
   const [permission, setPermission] = useState(ADMIN_PERMISSION_OPTIONS[0]?.value ?? '');
-  const [scope, setScope] = useState<AdminPermissionScope>('global');
-  const [scopeCatalogId, setScopeCatalogId] = useState('');
-  const [scopeResourceId, setScopeResourceId] = useState('');
   const [validUntil, setValidUntil] = useState('');
   const [reason, setReason] = useState('');
   const [revoking, setRevoking] = useState<PermissionAssignmentOut | null>(null);
@@ -72,17 +68,12 @@ function PermissionPanel() {
       grantPermissionAssignment({
         user_id: userId.trim(),
         permission,
-        scope,
-        scope_catalog_id: isUuid(scopeCatalogId.trim()) ? scopeCatalogId.trim() : null,
-        scope_resource_id: isUuid(scopeResourceId.trim()) ? scopeResourceId.trim() : null,
         valid_until: toIso(validUntil),
         reason: reason.trim(),
       }),
     onSuccess: () => {
       toast.success('已授予权限');
       setUserId('');
-      setScopeCatalogId('');
-      setScopeResourceId('');
       setValidUntil('');
       setReason('');
       queryClient.invalidateQueries({ queryKey: ['admin-permission-assignments'] });
@@ -92,8 +83,6 @@ function PermissionPanel() {
 
   const invalid =
     !isUuid(userId.trim()) ||
-    (scopeCatalogId.trim().length > 0 && !isUuid(scopeCatalogId.trim())) ||
-    (scopeResourceId.trim().length > 0 && !isUuid(scopeResourceId.trim())) ||
     reason.trim().length === 0;
 
   return (
@@ -102,7 +91,7 @@ function PermissionPanel() {
         系统管理员权限分配
       </h2>
       <p className="text-sm text-text-secondary">
-        按职责追加有限权限；到期即失效，可随时撤销。
+        后台职责权限覆盖全站；资料维护范围在下方按课程或资料单独分配。到期即失效，可随时撤销。
       </p>
 
       <form
@@ -110,7 +99,7 @@ function PermissionPanel() {
         onSubmit={(event) => {
           event.preventDefault();
           if (invalid) {
-            toast.error('请检查用户标识、作用范围标识与理由');
+            toast.error('请检查用户标识与理由');
             return;
           }
           mutation.mutate();
@@ -138,32 +127,6 @@ function PermissionPanel() {
                 ))}
               </select>
             </label>
-            <label className="block text-sm text-text-primary">
-              作用范围
-              <select
-                value={scope}
-                onChange={(event) => setScope(event.target.value as AdminPermissionScope)}
-                className={selectClass}
-              >
-                {Object.entries(ADMIN_PERMISSION_SCOPE_LABELS).map(([value, label]) => (
-                  <option key={value} value={value}>
-                    {label}
-                  </option>
-                ))}
-              </select>
-            </label>
-          </div>
-          <div className="grid gap-4 sm:grid-cols-2">
-            <Input
-              label="目录范围标识（选填）"
-              value={scopeCatalogId}
-              onChange={(event) => setScopeCatalogId(event.target.value)}
-            />
-            <Input
-              label="资料范围标识（选填）"
-              value={scopeResourceId}
-              onChange={(event) => setScopeResourceId(event.target.value)}
-            />
           </div>
           <label className="block text-sm text-text-primary">
             到期时间（选填）
@@ -218,6 +181,7 @@ function PermissionPanel() {
                     用户 {item.user_id.slice(0, 8)}… · 范围{' '}
                     {ADMIN_PERMISSION_SCOPE_LABELS[item.scope]}
                     {item.valid_until ? ` · 到期 ${formatDateTime(item.valid_until)}` : ' · 长期有效'}
+                    {(item.scope !== 'global' || item.scope_catalog_id || item.scope_resource_id) && ' · 旧范围记录不再生效，需重新核对授权'}
                   </p>
                   {item.reason && (
                     <p className="break-words text-text-secondary">理由：{item.reason}</p>

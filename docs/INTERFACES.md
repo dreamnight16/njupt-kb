@@ -1,5 +1,69 @@
 # 跨模块接口声明
 
+## 0.0.2 当前增补
+
+此前 beta16 及更早章节为阶段契约；以下变更优先，完整边界见 `RELEASE_0.0.2.md`。
+
+| 接口/契约 | 变化 |
+| --- | --- |
+| `GET /features` | 只返回 `commerce_enabled`、`ai_enabled`，不返回配置或凭据；写接口仍独立校验开关 |
+| `GET /me` 与登录响应 | 增加本人有效 `permissions`；不以客户端权限列表代替服务端判断 |
+| `POST /admin/permission-assignments` | 全站职责授权；请求移除 `scope`/`scope_catalog_id`/`scope_resource_id`，额外字段拒绝。旧范围记录不生效，显式重新授予才转换为全站 |
+| `POST /admin/contributor-applications/{id}/status` | `contributor.review`；`expected_status`、目标 `status`、理由；允许 active↔suspended、active/suspended→exited |
+| `POST /me/contributor-applications/{id}/exit` | 本人只能退出；不得恢复、暂停他人；暂停/退出撤销受托分配，合同/收益独立保留 |
+| 审核 `decide` | 不再自动发布；有效审核权限和任务分配均需通过；作者自审例外规则仍保留 |
+| `GET /admin/publication-candidates` | `resource.publish`；每资源最新通过审核且未生效的版本、资源修订号及审核时间，游标分页 |
+| `POST /admin/resources/{id}/publication` | 原接口独立执行；再次核对版本、唯一主文件、扫描、传播来源和修订号 |
+| `GET /me/mfa` | 本人启用/配置状态、剩余恢复码数与近期认证状态，不返回种子或摘要 |
+| `POST /me/mfa/setup` | 当前密码，返回十分钟有效的绑定种子与 otpauth URI；种子只存独立密钥加密密文 |
+| `POST /me/mfa/confirm` | `otp`；返回一次性的 8 个恢复码，轮换当前会话并撤销其他设备 |
+| `POST /me/mfa/reauth`、`/disable` | `password` + `otp`（动态码或恢复码）；均限频，轮换会话；禁用清除种子与恢复码 |
+| `POST /auth/login` | 增加可选 `otp`；已绑定 MFA 时缺失/无效返回 `MFA_REQUIRED`/`MFA_INVALID`，不签发会话 |
+| 生产敏感管理写操作 | 授权/发布/权益/协议/价格/结算/付款等门禁返回 `MFA_SETUP_REQUIRED` 或 `MFA_REAUTH_REQUIRED`；开发验证不自动启用生产门禁 |
+| `GET /me/price-proposals` | 只查询本人商品的方案，过滤在分页前完成 |
+| 协议/价格域事件 | 生成 `agreement_updated`/`price_updated` 通知；状态与必要 ID，不携带哈希、条款或金额；不自动重放历史已处理事件 |
+| `GET /admin/payouts/{id}/attempts` | `payout.manage`，游标分页；不确定尝试可凭证据在原记录上核实为成功/失败 |
+| `GET /admin/audit/export` | 审计写入失败返回可重试依赖错误，不下发无留痕文件 |
+| `GET /notifications/stream` | 心跳复查会话/账号；响应开始前断连同样归还名额；上限仍为每进程计数 |
+| Worker | 队列 `njupt.scan`/`njupt.derive`/`njupt.notify`/`njupt.ai`，控制及旧任务队列 `njupt`；清理调度 `RETENTION_SCHEDULE_ENABLED=false` |
+
+数据库 head：`0013_v002_mfa`；先迁移后启新应用。新增 `user_mfa` 和会话 `mfa_verified_at`；`0012` 扩展持久化枚举约束，不能依靠新库建表替代升级。
+
+## beta16 增补
+
+### 统一搜索（新模块 `app/modules/search`，迁移 `0011_beta16_search`）
+
+| 接口 | 权限与契约 |
+| --- | --- |
+| `GET /search?q=&scope=all\|course\|resource\|creator&limit=` | 匿名可用；`q` 1–`SEARCH_QUERY_MAX_CHARS`；返回 `SearchOut{query, scope, courses, resources, creators, total}`；资源经 `visible_resource_ids` 过滤且只取已发布有发布版本；复用 `RATE_LIMIT_SEARCH` 分级限流；写一条 `search_queries`（失败不影响响应） |
+| `GET /search/suggest?q=` | 匿名可用；`q` 短于 `SEARCH_SUGGEST_MIN_CHARS` 返回空列表不报错；最多 `SEARCH_SUGGEST_LIMIT` 条 `{type,id,label,sublabel,href}`；前缀优先；**不写日志** |
+| `GET /search/hot` | 匿名可用；窗口 `SEARCH_HOT_WINDOW_DAYS`、条数 `SEARCH_HOT_LIMIT`；排除零结果与单字词；`PUBLIC_READ` 短 TTL 缓存 |
+| `GET /search/resources` | **原 `GET /search` 迁移至此**，参数与返回 `CursorPage<SearchItem>` 不变 |
+
+`search_queries` 只含 `query_norm`、`scope`、`result_count`、`zero_result`、`created_at`，**不含用户标识/IP/UA/原始输入**。保留期清理入口 `python -m app.modules.search.retention`（`SEARCH_LOG_RETENTION_DAYS`）。
+
+### 管理端分析与审计导出（`app/modules/ops`）
+
+| 接口 | 权限与契约 |
+| --- | --- |
+| `GET /admin/analytics/overview?days=` | `metrics.view`；默认 `ANALYTICS_DEFAULT_WINDOW_DAYS`、上限 `ANALYTICS_MAX_WINDOW_DAYS`；UTC 自然日分桶并补零；返回 `series`(12 指标)、`totals`、`funnel`(5 段)、`top_courses`(≤10)、`data_notes`；只读聚合，查询数与 `days` 无关 |
+| `GET /admin/audit/export?from=&to=&action=&limit=` | `audit.view`；`text/csv; charset=utf-8` + BOM；列只含时间/动作/操作者邮箱与角色/对象/请求 ID，**不导出 before/after**；`action` 前缀匹配；`to > from`；上限 `AUDIT_EXPORT_MAX_ROWS`，截断时 `X-Export-Truncated: true`；`= + - @` 开头单元格前置单引号；导出自身写 `audit.export` 审计 |
+
+### 通知实时流（`app/modules/notification`）
+
+`GET /notifications/stream`（登录用户，SSE）：`event: unread` + `data: {"unread": N}`、`event: ping` + `data: {"t": iso8601}`。连接即推一次未读，心跳时复查、**变化才补推**；到 `NOTIFICATION_STREAM_MAX_SECONDS` 正常结束。**只推计数不推正文**。开关关闭 `NotEnabled`（503）；进程内并发连接上限 `NOTIFICATION_STREAM_MAX_CONNECTIONS`，超限 409。计数在生成器 `finally` 释放；每次复查用短生命周期会话，不长期占用连接池。
+
+### beta15 收口
+
+- `content.service.withdraw_resource`：owner / 管理员之外**追加** `can_manage_resource(..., AssignmentCapability.MANAGE)`；无权限仍 404。
+- `content.service.create_upload_session`：`resource_id` 非空时 owner 之外追加 `MAINTAIN`；不放宽后续提交版本的 `_ensure_owner`。
+- `cases.service.append_case_event`：关联侵权通知时按 `FORWARDED→已转送`、`DECIDED→已决定`、`CLOSED→已关闭` 联动 `rights_notices.status`，只前进不回退、幂等、写审计（注明不代表侵权认定）。
+- `licensing.service`：`AGREEMENT_ACCEPTED` / `PRICE_PROPOSED` / `PRICE_CONFIRMED` / `PRICE_REJECTED` 四类域事件（`dedupe_key` 去重，payload 只含 ID 与状态）；新增 `POST /price-proposals/{id}/rejections`（`PriceRejectionIn{reason}`，权利方本人或 `price.confirm`），否决复用 `WITHDRAWN` 终态。通知侧已登记分发，`NotificationType` 未扩充前只落事件不造通知。
+
+### 新增配置（均为可调默认值）
+
+`SEARCH_LOG_ENABLED`、`SEARCH_QUERY_MAX_CHARS=80`、`SEARCH_SUGGEST_LIMIT=6`、`SEARCH_SUGGEST_MIN_CHARS=1`、`SEARCH_HOT_WINDOW_DAYS=7`、`SEARCH_HOT_LIMIT=10`、`SEARCH_LOG_RETENTION_DAYS=90`；`ANALYTICS_DEFAULT_WINDOW_DAYS=14`、`ANALYTICS_MAX_WINDOW_DAYS=90`、`AUDIT_EXPORT_MAX_ROWS=5000`；`NOTIFICATION_STREAM_ENABLED=true`、`NOTIFICATION_STREAM_HEARTBEAT_SECONDS=25`、`NOTIFICATION_STREAM_MAX_SECONDS=300`、`NOTIFICATION_STREAM_MAX_CONNECTIONS=500`。
+
 ## beta13 增补
 
 - `moderation.comment_reports.create_comment_report` / `create_comment_appeal`：按 `reporter_id`/`appellant_id` 做提交频控（`check_rate_limit`，`COMMENT_REPORT_RATE_LIMIT`/`COMMENT_APPEAL_RATE_LIMIT`，窗口 `*_RATE_WINDOW_SECONDS`）与"本人未处理数"上限（`COMMENT_REPORT_OPEN_CAP`/`COMMENT_APPEAL_OPEN_CAP`）；超限返回 `429 RATE_LIMITED`（未处理上限用 code `REPORT_OPEN_CAP_EXCEEDED`/`APPEAL_OPEN_CAP_EXCEEDED`）。检查在既有唯一索引判定之前，不改变受理/驳回/处置权限与审计。

@@ -105,6 +105,12 @@ class PriceAcceptanceIn(_InputModel):
     accepted_hash: str = Field(min_length=1, max_length=64)
 
 
+class PriceRejectionIn(_InputModel):
+    """否决价格版本（beta16 §7.1）：理由必填，写入审计并对签约方可见。"""
+
+    reason: str = Field(min_length=1, max_length=500)
+
+
 class PriceProposalOut(_ORMModel):
     id: uuid.UUID
     product_id: uuid.UUID

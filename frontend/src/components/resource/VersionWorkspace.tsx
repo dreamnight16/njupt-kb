@@ -13,7 +13,7 @@ import { createVersion, getVersionDetail, listVersions, submitVersion, updateVer
   withdrawResource, createUpload, completeUpload, putFileToStorage, inspectFile, type VersionDetail } from '@/lib/api/content';
 import type { RightsBasis } from '@/lib/api/types';
 
-const reviewLabels = { draft: '草稿', pending: '审核中', approved: '已通过', rejected: '已驳回' };
+const reviewLabels = { draft: '草稿', pending: '审核中', needs_info: '需要补证', approved: '已通过', rejected: '已驳回' };
 const scanLabels = { pending: '等待检查', running: '检查中', passed: '检查通过', rejected: '检查拒绝', failed: '检查失败' };
 
 export function VersionWorkspace({ resourceId, versionId }: { resourceId: string; versionId: string }) {

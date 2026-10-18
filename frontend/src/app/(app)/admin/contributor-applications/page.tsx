@@ -10,6 +10,7 @@ import { Button } from '@/components/ui/Button';
 import { EmptyState } from '@/components/ui/EmptyState';
 import { Modal } from '@/components/ui/Modal';
 import { SkeletonList } from '@/components/ui/Skeleton';
+import { ContributorStatusForm } from '@/components/workspace/ContributorStatusForm';
 import { describeError } from '@/lib/api/client';
 import {
   CONTRIBUTOR_DECISION_LABELS,
@@ -21,7 +22,7 @@ import {
   type ContributorOnboardingStatus,
 } from '@/lib/api/creator';
 import { formatDateTime } from '@/lib/utils';
-import { canReview, useAuthStore } from '@/stores/authStore';
+import { hasPermission, useAuthStore } from '@/stores/authStore';
 
 const statusTone: Record<ContributorOnboardingStatus, 'gray' | 'yellow' | 'green' | 'red' | 'orange'> = {
   applied: 'gray',
@@ -36,7 +37,7 @@ const DECISIONS: ContributorDecision[] = ['under_review', 'active', 'rejected'];
 
 export default function AdminContributorApplicationsPage() {
   const user = useAuthStore((s) => s.user);
-  return canReview(user) ? <ApplicationsPanel /> : <Notice title="需要入驻审核权限" />;
+  return hasPermission(user, 'contributor.review') ? <ApplicationsPanel /> : <Notice title="需要入驻审核权限" />;
 }
 
 function ApplicationsPanel() {
@@ -152,7 +153,8 @@ function DecisionModal({
     onError: (error) => toast.error(describeError(error).message),
   });
 
-  const terminal = application.status === 'active' || application.status === 'rejected';
+  const lifecycle = application.status === 'active' || application.status === 'suspended';
+  const terminal = application.status === 'exited' || application.status === 'rejected';
 
   return (
     <Modal isOpen onClose={onClose} title={`入驻申请 · ${application.id.slice(0, 8)}…`}>
@@ -192,9 +194,13 @@ function DecisionModal({
           )}
         </section>
 
-        {terminal ? (
+        {lifecycle ? (
+          <ContributorStatusForm application={application} onChanged={() => {
+            onChanged(); onClose();
+          }} />
+        ) : terminal ? (
           <Notice tone="info" title="该申请已终态">
-            已通过或已拒绝的申请不再受理；如需变更，请由用户重新提交。
+            已退出或已拒绝的申请不再受理；如需入驻，请由用户重新提交。
           </Notice>
         ) : (
           <form

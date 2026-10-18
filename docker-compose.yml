@@ -122,7 +122,7 @@ services:
     build:
       context: ./backend
       dockerfile: Dockerfile.worker
-    command: celery -A app.workers.celery_app:celery_app worker -Q njupt -l info --concurrency=2
+    command: celery -A app.workers.celery_app:celery_app worker -Q njupt,njupt.scan,njupt.derive,njupt.notify,njupt.ai -l info --concurrency=2
     environment:
       <<: *backend-env
     volumes:

@@ -32,3 +32,13 @@ export async function setNotificationRead(
 export async function markAllNotificationsRead(): Promise<{updated:number}> {
   return (await api.post('/notifications/read-all')).data;
 }
+
+export interface UnreadCount {
+  unread: number;
+}
+
+/** 未读数：SSE 不可用时作为轮询兜底（beta16 §33）。 */
+export async function fetchUnreadCount(): Promise<UnreadCount> {
+  const { data } = await api.get<UnreadCount>('/notifications/unread-count');
+  return data;
+}

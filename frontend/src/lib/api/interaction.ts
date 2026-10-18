@@ -155,8 +155,9 @@ export interface SearchParams {
   limit?: number;
 }
 
+/** 资源搜索（beta16 迁至 `/search/resources`）：参数与返回结构保持不变。 */
 export async function search(params: SearchParams = {}): Promise<CursorPage<SearchItem>> {
-  const { data } = await api.get<CursorPage<SearchItem>>('/search', { params });
+  const { data } = await api.get<CursorPage<SearchItem>>('/search/resources', { params });
   return data;
 }
 

@@ -39,10 +39,13 @@ async def _assert_workspace_access(db, user, resource, version=None) -> bool:
 
     if await can_manage_resource(db, user, resource.id, AssignmentCapability.MAINTAIN):
         return True
-    if service._is_manager(user):
+    if await service._is_manager(db, user):
+        from app.core.permissions import RESOURCE_PUBLISH, effective_permissions
         from app.modules.moderation.service import can_review
 
-        if version is None or await can_review(db, user, version.id):
+        if version is None or await can_review(db, user, version.id) or (
+            version.review_status == "approved" and RESOURCE_PUBLISH in await effective_permissions(db, user)
+        ):
             return False
     raise NotFound("资料不存在")
 

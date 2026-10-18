@@ -73,7 +73,25 @@ def visible_resource_ids(user):
                 policy.metadata_scope == ScopeType.AUTHENTICATED.value,
                 and_(policy.metadata_scope == ScopeType.EXPLICIT_GRANT.value, grant),
             )
-            if has_permission(user, RESOURCE_REVIEW):
+            permissions = table(
+                "admin_permission_assignments", column("user_id", Uuid),
+                column("permission"), column("scope"), column("revoked_at", DateTime),
+                column("valid_until", DateTime),
+                column("scope_catalog_id", Uuid), column("scope_resource_id", Uuid),
+            )
+            review_permission = or_(
+                true() if has_permission(user, RESOURCE_REVIEW) else false(),
+                exists(select(permissions.c.user_id).where(
+                    permissions.c.user_id == user.id,
+                    permissions.c.permission == RESOURCE_REVIEW,
+                    permissions.c.scope == "global",
+                    permissions.c.scope_catalog_id.is_(None),
+                    permissions.c.scope_resource_id.is_(None),
+                    permissions.c.revoked_at.is_(None),
+                    or_(permissions.c.valid_until.is_(None), permissions.c.valid_until > now),
+                )),
+            )
+            if user is not None:
                 reviews = table(
                     "reviews",
                     column("version_id", Uuid),
@@ -90,7 +108,7 @@ def visible_resource_ids(user):
                         ),
                     )
                 ).correlate(resources)
-                allowed = or_(allowed, work)
+                allowed = or_(allowed, and_(review_permission, work))
     return (
         select(resources.c.id)
         .select_from(resources.outerjoin(policy, policy.resource_id == resources.c.id))

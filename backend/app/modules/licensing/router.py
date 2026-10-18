@@ -33,6 +33,7 @@ from app.modules.licensing.schemas import (
     PriceAcceptanceIn,
     PriceProposalCreateIn,
     PriceProposalOut,
+    PriceRejectionIn,
     RevenueRuleVersionCreateIn,
     RevenueRuleVersionOut,
 )
@@ -124,6 +125,31 @@ async def accept_price_proposal(
         payload=payload,
         request_id=request_id,
         idempotency_key=idempotency_key,
+    )
+
+
+@router.post(
+    "/price-proposals/{proposal_id}/rejections",
+    response_model=PriceProposalOut,
+)
+async def reject_price_proposal(
+    proposal_id: uuid.UUID,
+    payload: PriceRejectionIn,
+    user: "User" = Depends(get_current_user),
+    request_id: str = Depends(get_request_id),
+    db: AsyncSession = Depends(get_db),
+) -> PriceProposalOut:
+    """否决价格版本（beta16）：权利方本人或持 `PRICE_CONFIRM` 的平台人员。
+
+    否决使该版本不可再确认，但不覆盖历史金额（不变量 3）；「否决」与「提案方撤回」
+    共用 `WITHDRAWN` 终态，差别由审计与 `price.rejected` 域事件区分。
+    """
+    return await service.reject_price_proposal(
+        db,
+        user=user,
+        proposal_id=proposal_id,
+        reason=payload.reason,
+        request_id=request_id,
     )
 
 
@@ -234,8 +260,16 @@ async def freeze_composition(
 async def list_admin_price_proposals(
     limit: int | None = Query(default=None, ge=1, le=100),
     cursor: str | None = Query(default=None),
-    actor: "User" = Depends(require(AGREEMENT_MANAGE)),
+    actor: "User" = Depends(require(PRICE_CONFIRM)),
     db: AsyncSession = Depends(get_db),
 ) -> CursorPage[PriceProposalOut]:
     """价格方案列表（只读，分页）。"""
     return await service.list_admin_price_proposals(db, limit=limit, cursor=cursor)
+
+
+@router.get("/me/price-proposals", response_model=CursorPage[PriceProposalOut])
+async def list_my_price_proposals(
+    limit: int | None = Query(default=None, ge=1, le=100), cursor: str | None = None,
+    user: "User" = Depends(get_current_user), db: AsyncSession = Depends(get_db),
+) -> CursorPage[PriceProposalOut]:
+    return await service.list_admin_price_proposals(db, owner_id=user.id, limit=limit, cursor=cursor)

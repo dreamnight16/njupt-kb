@@ -17,6 +17,7 @@ const items = [
   { href: '/me/contributor-application', label: '入驻申请' },
   { href: '/me/cases', label: '我的案件' },
   { href: '/me/agreements', label: '我的协议' },
+  { href: '/me/settlements', label: '结算单' },
   { href: '/me/security', label: '账号与安全' },
 ];
 

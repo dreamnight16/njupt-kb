@@ -16,13 +16,12 @@ from app.core.enums import AdminPermissionScope, AssignmentCapability
 
 
 class PermissionAssignmentCreate(BaseModel):
-    """给某用户按职责追加一项管理权限（§3.1）。"""
+    """全站职责授权；对象维护范围由 ResourceAssignment 单独管理。"""
+
+    model_config = ConfigDict(extra="forbid")
 
     user_id: uuid.UUID
     permission: str = Field(min_length=1, max_length=64)
-    scope: AdminPermissionScope = AdminPermissionScope.GLOBAL
-    scope_catalog_id: uuid.UUID | None = None
-    scope_resource_id: uuid.UUID | None = None
     valid_until: datetime | None = None
     reason: str = Field(min_length=1, max_length=255)
 

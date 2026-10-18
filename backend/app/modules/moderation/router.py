@@ -41,6 +41,7 @@ from app.modules.moderation.schemas import (
     ModerationSummaryOut,
     PublicationIn,
     PublicationOut,
+    PublicationCandidateOut,
     PersonalReportOut,
     PersonalReportEventOut,
     PersonalCommentAppealOut,
@@ -183,6 +184,14 @@ async def decide_review(
 # --------------------------------------------------------------------------- #
 # 发布与时效
 # --------------------------------------------------------------------------- #
+
+
+@router.get("/admin/publication-candidates", response_model=CursorPage[PublicationCandidateOut])
+async def publication_candidates(
+    limit: int | None = Query(default=None, ge=1, le=100), cursor: str | None = None,
+    user: "User" = Depends(require(RESOURCE_PUBLISH)), db: AsyncSession = Depends(get_db),
+) -> CursorPage[PublicationCandidateOut]:
+    return await service.list_publication_candidates(db, limit=limit, cursor=cursor)
 
 
 @router.post("/admin/resources/{resource_id}/publication", response_model=PublicationOut)

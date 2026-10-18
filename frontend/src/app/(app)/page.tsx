@@ -21,7 +21,7 @@ export const dynamic = 'force-dynamic';
 export default async function HomePage() {
   const [coursesResult, recentResult] = await Promise.all([
     serverFetch<CursorPage<CourseListItem>>('/courses?limit=6'),
-    serverFetch<CursorPage<SearchItem>>('/search?limit=6'),
+    serverFetch<CursorPage<SearchItem>>('/search/resources?limit=6'),
   ]);
 
   return (

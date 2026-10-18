@@ -318,6 +318,8 @@ class NotificationType(StrEnum):
     ASSIGNMENT_CHANGED = "assignment_changed"
     CASE_RESULT = "case_result"
     RIGHTS_NOTICE_RESULT = "rights_notice_result"
+    AGREEMENT_UPDATED = "agreement_updated"
+    PRICE_UPDATED = "price_updated"
 
 
 class AIProcessStatus(StrEnum):
@@ -453,6 +455,11 @@ class DomainEventType(StrEnum):
     RIGHTS_NOTICE_RECEIVED = "rights_notice.received"
     RIGHTS_NOTICE_COUNTER = "rights_notice.counter"
     RIGHTS_NOTICE_DECIDED = "rights_notice.decided"
+    # --- beta16：授权协议与双向定价的域事件（补齐 beta15 只落库不通知的边界）---
+    AGREEMENT_ACCEPTED = "agreement.accepted"
+    PRICE_PROPOSED = "price.proposed"
+    PRICE_CONFIRMED = "price.confirmed"
+    PRICE_REJECTED = "price.rejected"
 
 
 # =====================================================================

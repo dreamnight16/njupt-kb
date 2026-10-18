@@ -144,3 +144,61 @@ class MetricsOut(BaseModel):
     jobs: JobBacklogOut
     slow_query_ms: int
     generated_at: datetime
+
+
+class AnalyticsCounts(BaseModel):
+    """单个统计口径的计数集合，供按日分桶与窗口汇总共用（§43）。
+
+    字段即对外指标名，前端可直接按同名字段画图；口径见 `ops.analytics` 的 docstring。
+    """
+
+    new_users: int
+    new_resources: int
+    published_versions: int
+    downloads: int
+    favorites: int
+    ratings: int
+    comments: int
+    reports: int
+    corrections: int
+    requests: int
+    cases: int
+
+
+class AnalyticsPoint(AnalyticsCounts):
+    """一天的分桶计数。窗口内没有数据的日期也返回 0，避免前端折线断点。"""
+
+    date: str  # UTC 自然日，YYYY-MM-DD
+
+
+class AnalyticsFunnelOut(BaseModel):
+    """窗口内转化漏斗：上传会话 → 提交版本 → 审核通过 → 发布 → 下载授权。
+
+    各阶段口径不同、分母不同，只做绝对量展示，不计算「用户转化率」（§43）。
+    """
+
+    uploaded: int
+    submitted: int
+    approved: int
+    published: int
+    downloaded: int
+
+
+class TopCourseItem(BaseModel):
+    """窗口内下载授权数领先的课程：只暴露课程 id/名称与下载数。"""
+
+    course_id: uuid.UUID
+    name: str
+    download_count: int
+
+
+class AnalyticsOverviewOut(BaseModel):
+    """管理端数据分析总览：只读聚合，不写库、不建定时任务（§43）。"""
+
+    window_days: int
+    generated_at: datetime
+    series: list[AnalyticsPoint]
+    totals: AnalyticsCounts
+    funnel: AnalyticsFunnelOut
+    top_courses: list[TopCourseItem]
+    data_notes: list[str]

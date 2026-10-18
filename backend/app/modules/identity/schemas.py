@@ -39,6 +39,7 @@ class EmailVerificationConfirmRequest(BaseModel):
 class LoginRequest(BaseModel):
     email: EmailStr
     password: str
+    otp: str | None = Field(default=None, max_length=64)
 
 
 class PasswordChangeRequest(BaseModel):
@@ -73,6 +74,7 @@ class MeResponse(BaseModel):
     id: uuid.UUID
     email: str
     role: str
+    permissions: list[str] = Field(default_factory=list)
     status: str
     display_name: str
     avatar_url: str | None = None

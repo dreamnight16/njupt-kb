@@ -157,6 +157,45 @@
       opacity: 0;
     }
   }
+
+  /*
+   * 内联 SVG 趋势图（后台数据分析）：折线描边与柱体生长只解释「数据已就位」。
+   * 仅在允许动效时启用；减少动态效果时图形直接呈现，信息不受影响。
+   */
+  .dn-chart-line {
+    stroke-dasharray: 1;
+    stroke-dashoffset: 0;
+  }
+
+  @media (prefers-reduced-motion: no-preference) {
+    .dn-chart-line {
+      animation: dn-chart-draw 900ms var(--dn-ease-out) both;
+    }
+
+    .dn-chart-bar {
+      transform-box: fill-box;
+      transform-origin: bottom;
+      animation: dn-chart-rise 480ms var(--dn-ease-out) both;
+    }
+  }
+
+  @keyframes dn-chart-draw {
+    from {
+      stroke-dashoffset: 1;
+    }
+    to {
+      stroke-dashoffset: 0;
+    }
+  }
+
+  @keyframes dn-chart-rise {
+    from {
+      transform: scaleY(0);
+    }
+    to {
+      transform: scaleY(1);
+    }
+  }
 }
 
 /* 滚动条：直角、低干扰。 */

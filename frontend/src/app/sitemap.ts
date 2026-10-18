@@ -29,7 +29,7 @@ export default async function sitemap(): Promise<MetadataRoute.Sitemap> {
 
   const [courses, resources] = await Promise.all([
     fetchPublic<CursorPage<CourseListItem>>('/courses?limit=100'),
-    fetchPublic<CursorPage<SearchItem>>('/search?limit=100'),
+    fetchPublic<CursorPage<SearchItem>>('/search/resources?limit=100'),
   ]);
 
   for (const course of courses?.items ?? []) {

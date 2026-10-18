@@ -9,10 +9,10 @@ import { Notice } from "@/components/common/Notice";
 import { api, describeError } from "@/lib/api/client";
 import type { CursorPage } from "@/lib/api/types";
 import type { CommentItem } from "@/lib/api/interaction";
-import { isAdmin, useAuthStore } from "@/stores/authStore";
+import { hasPermission, useAuthStore } from "@/stores/authStore";
 export default function Page() {
   const user = useAuthStore((s) => s.user);
-  return isAdmin(user) ? <Queue /> : <Notice title="需要管理员权限" />;
+  return hasPermission(user, 'comment.moderate') ? <Queue /> : <Notice title="需要管理员权限" />;
 }
 function Queue() {
   const user = useAuthStore((s) => s.user);
@@ -28,7 +28,7 @@ function Queue() {
         })
       ).data,
     getNextPageParam: (p) => (p.has_more ? p.next_cursor : undefined),
-    enabled: isAdmin(user),
+    enabled: hasPermission(user, 'comment.moderate'),
   });
   return (
     <div className="space-y-4">

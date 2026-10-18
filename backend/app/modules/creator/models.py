@@ -100,11 +100,8 @@ class ContributorApplication(Base, UUIDPrimaryKey, Timestamped):
 
     普通用户可直接投稿免费内容；只有希望有偿销售时才需要入驻。入驻表示经认可的
     长期专业贡献关系，不代表投稿免审或分成必然更高（§3.4）。申请与结论只追加保留，
-    状态机为 `applied → under_review → active/rejected`。
-
-    边界（§3.4）：本版不实现降级/退出流程，`suspended`/`exited` 仅保留枚举值。
-    降级或暂停专业身份不抹去已生效授权、合法应付收益及购买者权益——若后续实现，
-    须与合同终止、财务清算分开处理，不得用「撤销角色」代替结算。
+    状态机为 `applied → under_review → active/rejected`，生效后可暂停、恢复或退出。
+    暂停及退出撤销受托管理范围，保留本人内容、既有合同、收益与购买权益。
     """
 
     __tablename__ = "contributor_applications"

@@ -20,7 +20,7 @@ DEFAULT_CODES: dict[int, str] = {
     status.HTTP_403_FORBIDDEN: "FORBIDDEN",
     status.HTTP_404_NOT_FOUND: "NOT_FOUND",
     status.HTTP_409_CONFLICT: "CONFLICT",
-    status.HTTP_422_UNPROCESSABLE_ENTITY: "VALIDATION_ERROR",
+    status.HTTP_422_UNPROCESSABLE_CONTENT: "VALIDATION_ERROR",
     status.HTTP_429_TOO_MANY_REQUESTS: "RATE_LIMITED",
     status.HTTP_503_SERVICE_UNAVAILABLE: "DEPENDENCY_UNAVAILABLE",
 }
@@ -53,7 +53,7 @@ class AppError(Exception):
 
 
 class InvalidInput(AppError):
-    http_status = status.HTTP_422_UNPROCESSABLE_ENTITY
+    http_status = status.HTTP_422_UNPROCESSABLE_CONTENT
     code = "VALIDATION_ERROR"
 
 
@@ -127,7 +127,7 @@ def install_error_handlers(app: FastAPI) -> None:
     @app.exception_handler(RequestValidationError)
     async def _validation_error(request: Request, exc: RequestValidationError) -> JSONResponse:
         return JSONResponse(
-            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
             content=error_body(
                 "VALIDATION_ERROR",
                 "请求参数不符合要求",

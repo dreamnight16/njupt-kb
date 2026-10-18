@@ -181,3 +181,18 @@ export async function decideContributorApplication(
   );
   return data;
 }
+
+export async function changeContributorStatus(
+  application: ContributorApplicationOut,
+  status: 'active' | 'suspended' | 'exited',
+  reason: string,
+  selfExit = false,
+): Promise<ContributorApplicationOut> {
+  const path = selfExit
+    ? `/me/contributor-applications/${application.id}/exit`
+    : `/admin/contributor-applications/${application.id}/status`;
+  const { data } = await api.post<ContributorApplicationOut>(path, {
+    expected_status: application.status, status, reason,
+  });
+  return data;
+}
