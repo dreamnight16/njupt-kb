@@ -27,7 +27,8 @@ export default async function HomePage() {
   return (
     <div className="space-y-10">
       <section className="bg-brand px-6 py-6 text-on-color md:px-10 md:py-8">
-        <h1 className="dn-display max-w-2xl text-3xl md:text-4xl">
+        <p className="dn-kicker">NJUPT COURSE KNOWLEDGE</p>
+        <h1 className="dn-display mt-3 max-w-2xl text-3xl md:text-4xl">
           课程资料
         </h1>
         <div className="mt-6 max-w-2xl">
@@ -65,6 +66,7 @@ export default async function HomePage() {
       <section aria-labelledby="recent-courses">
         <div className="mb-4 flex items-end justify-between gap-4">
           <div>
+            <p className="dn-kicker text-text-secondary">COURSES</p>
             <h2 id="recent-courses" className="dn-display text-2xl">
               课程
             </h2>
@@ -96,6 +98,7 @@ export default async function HomePage() {
       <section aria-labelledby="recent-resources">
         <div className="mb-4 flex items-end justify-between gap-4">
           <div>
+            <p className="dn-kicker text-text-secondary">RECENT</p>
             <h2 id="recent-resources" className="dn-display text-2xl">
               最新资料
             </h2>

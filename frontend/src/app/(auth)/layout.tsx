@@ -12,7 +12,8 @@ export default function AuthLayout({ children }: { children: React.ReactNode }) 
           <span className="dn-display text-lg">南邮课程知识平台</span>
         </Link>
         <div>
-          <h1 className="dn-display text-4xl">
+          <p className="dn-kicker">NJUPT COURSE KNOWLEDGE</p>
+          <h1 className="dn-display mt-3 text-4xl">
             课程资料
           </h1>
           <p className="mt-4 max-w-sm text-on-color">

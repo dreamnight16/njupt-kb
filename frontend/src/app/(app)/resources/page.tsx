@@ -81,7 +81,8 @@ export default async function ResourcesPage({
   return (
     <div className="space-y-6">
       <header className="bg-ink px-6 py-8 text-on-ink">
-        <h1 className="dn-display text-3xl">资料</h1>
+        <p className="dn-kicker">RESOURCES</p>
+        <h1 className="dn-display mt-2 text-3xl">资料</h1>
       </header>
 
       <form action="/resources" className="grid gap-3 border border-divider bg-surface p-4 sm:grid-cols-[1fr_auto_auto]">
