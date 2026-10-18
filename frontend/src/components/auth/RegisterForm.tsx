@@ -1,19 +1,35 @@
 'use client';
 
 import Link from 'next/link';
-import { FormEvent, useState } from 'react';
+import { FormEvent, useCallback, useEffect, useState } from 'react';
 import { useMutation } from '@tanstack/react-query';
 
 import { Notice } from '@/components/common/Notice';
 import { Button } from '@/components/ui/Button';
 import { Input } from '@/components/ui/Input';
-import { register } from '@/lib/api/auth';
+import { Captcha, fetchCaptcha, register } from '@/lib/api/auth';
 import { describeError } from '@/lib/api/client';
 
 export function RegisterForm() {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [displayName, setDisplayName] = useState('');
+  const [captcha, setCaptcha] = useState<Captcha | null>(null);
+  const [captchaCode, setCaptchaCode] = useState('');
+
+  // 一次性验证码：进入页面与每次提交失败后都换新码，避免旧码已被消费。
+  const loadCaptcha = useCallback(async () => {
+    setCaptchaCode('');
+    try {
+      setCaptcha(await fetchCaptcha('register'));
+    } catch {
+      setCaptcha(null);
+    }
+  }, []);
+
+  useEffect(() => {
+    void loadCaptcha();
+  }, [loadCaptcha]);
 
   const registerMutation = useMutation({
     mutationFn: () =>
@@ -21,7 +37,13 @@ export function RegisterForm() {
         email: email.trim(),
         password,
         display_name: displayName.trim() || undefined,
+        captcha_id: captcha?.captcha_id,
+        captcha_code: captchaCode.trim() || undefined,
       }),
+    onError: () => {
+      // 提交失败后旧码可能已失效/被消费，换新码再试。
+      void loadCaptcha();
+    },
   });
 
   function handleSubmit(event: FormEvent<HTMLFormElement>) {
@@ -106,6 +128,50 @@ export function RegisterForm() {
         <p className="text-xs text-text-secondary">
           建议使用较长的密码，避免与其他网站重复使用。
         </p>
+
+        <div>
+          <label htmlFor="captcha_code" className="block text-sm">
+            图形验证码
+          </label>
+          <div className="mt-1 flex items-stretch gap-3">
+            <Input
+              id="captcha_code"
+              name="captcha_code"
+              autoComplete="off"
+              required
+              maxLength={6}
+              placeholder="不区分大小写"
+              value={captchaCode}
+              onChange={(event) => setCaptchaCode(event.target.value)}
+            />
+            <button
+              type="button"
+              onClick={() => void loadCaptcha()}
+              aria-label="换一张验证码"
+              title="点击刷新验证码"
+              className="min-h-11 shrink-0 border border-divider bg-white px-2 hover:bg-canvas"
+            >
+              {captcha ? (
+                // eslint-disable-next-line @next/next/no-img-element
+                <img
+                  src={captcha.image}
+                  alt="图形验证码"
+                  width={126}
+                  height={45}
+                  className="block"
+                />
+              ) : (
+                <span className="flex h-[45px] w-28 items-center justify-center text-center text-xs">
+                  加载失败，点此重试
+                </span>
+              )}
+            </button>
+          </div>
+          <p className="mt-1 text-xs text-text-secondary">
+            看不清？点击图片换一张。验证码一次性有效，提交失败后会自动刷新。
+          </p>
+        </div>
+
         <Button type="submit" className="w-full" isLoading={registerMutation.isPending}>
           注册
         </Button>

@@ -9,6 +9,16 @@ export interface RegisterRequest {
   email: string;
   password: string;
   display_name?: string;
+  /** 图形验证码：服务端开启 CAPTCHA 时必填。 */
+  captcha_id?: string;
+  captcha_code?: string;
+}
+
+export interface Captcha {
+  captcha_id: string;
+  /** PNG data URL（image/png;base64），可直接作为 <img> 的 src。 */
+  image: string;
+  ttl: number;
 }
 
 export interface RegisterResponse {
@@ -72,6 +82,14 @@ export interface SessionItem {
 
 export async function register(payload: RegisterRequest): Promise<RegisterResponse> {
   const { data } = await api.post<RegisterResponse>('/auth/register', payload);
+  return data;
+}
+
+/** 获取一次性图形验证码（PNG data URL）。失败时抛出，由调用方提示。 */
+export async function fetchCaptcha(
+  purpose: 'register' | 'login' = 'register',
+): Promise<Captcha> {
+  const { data } = await api.get<Captcha>('/auth/captcha', { params: { purpose } });
   return data;
 }
 

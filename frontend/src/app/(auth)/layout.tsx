@@ -6,9 +6,6 @@ export default function AuthLayout({ children }: { children: React.ReactNode }) 
       {/* 大面积品牌实色色块，而非白色圆角卡片（DESIGN.md §5.1）。 */}
       <section className="hidden bg-brand p-10 text-on-color lg:flex lg:flex-col lg:justify-between">
         <Link href="/" className="flex items-center gap-2">
-          <span className="grid h-9 w-9 place-items-center bg-on-color/15 text-base font-semibold">
-            邮
-          </span>
           <span className="dn-display text-lg">南邮课程知识平台</span>
         </Link>
         <div>
