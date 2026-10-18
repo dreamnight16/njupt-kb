@@ -158,14 +158,25 @@ class Beta11PreviewTests(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(grant.preview_url.startswith("https://storage.test/"))
 
         rows = await self._watermarked_rows()
-        self.assertEqual(len(rows), 1)
+        # 多页预览：默认渲染前 PREVIEW_IMAGE_MAX_PAGES 页，测试 PDF 只有 2 页。
+        expected_pages = min(2, settings.PREVIEW_IMAGE_MAX_PAGES)
+        self.assertEqual(len(rows), expected_pages)
+        self.assertEqual(sorted(row.page_no for row in rows), list(range(1, expected_pages + 1)))
+        self.assertEqual(len({row.storage_key for row in rows}), expected_pages)
+        # 返回体逐页签发 URL，第一页仍是 preview_url（旧客户端兼容）。
+        self.assertEqual([page.page_no for page in grant.pages], list(range(1, expected_pages + 1)))
+        self.assertEqual(grant.pages[0].url, grant.preview_url)
+        self.assertEqual(len({page.url for page in grant.pages}), expected_pages)
+        self.assertTrue(grant.watermarked)
+
         row = rows[0]
         self.assertEqual(row.kind, DerivativeKind.WATERMARKED_PREVIEW.value)
         self.assertEqual(row.status, DerivativeStatus.READY.value)
         self.assertEqual(row.page_count, 1)
-        # storage_key 含用户短码，用于按用户区分。
+        # storage_key 含用户短码与页码，用于按用户、按页区分。
         short_code = content.user_short_code(self.owner.id)
         self.assertIn(short_code, row.storage_key)
+        self.assertIn("-p1-", row.storage_key)
 
         # 上传内容确为有效 WebP 图片：尺寸不超限定宽度、模式 RGB（Pillow 验证）。
         self.assertIn(row.storage_key, uploaded)
@@ -184,8 +195,10 @@ class Beta11PreviewTests(unittest.IsolatedAsyncioTestCase):
         second = await self._grant(self.other)
 
         rows = await self._watermarked_rows()
-        self.assertEqual(len(rows), 2)
-        self.assertEqual(len({row.storage_key for row in rows}), 2)
+        expected_pages = min(2, settings.PREVIEW_IMAGE_MAX_PAGES)
+        # 两个用户 × 每用户 N 页：不同用户、不同页都是独立对象。
+        self.assertEqual(len(rows), expected_pages * 2)
+        self.assertEqual(len({row.storage_key for row in rows}), expected_pages * 2)
 
         owner_short = content.user_short_code(self.owner.id)
         other_short = content.user_short_code(self.other.id)
@@ -193,8 +206,9 @@ class Beta11PreviewTests(unittest.IsolatedAsyncioTestCase):
         for row in rows:
             for short in (owner_short, other_short):
                 if short in row.storage_key:
-                    by_short[short] = row
+                    by_short.setdefault(short, []).append(row)
         self.assertEqual(set(by_short), {owner_short, other_short})
+        self.assertEqual({len(items) for items in by_short.values()}, {expected_pages})
         # 两个用户各自拿到自己的图（签名 URL 指向各自对象）。
         self.assertNotEqual(first.preview_url, second.preview_url)
 
@@ -205,14 +219,16 @@ class Beta11PreviewTests(unittest.IsolatedAsyncioTestCase):
         # 复用路径：若再次调用渲染函数，测试立即失败。
         with patch.object(
             content,
-            "build_watermarked_preview",
+            "build_watermarked_pages",
             AsyncMock(side_effect=AssertionError("ready 行不应重复渲染")),
         ):
             second = await self._grant(self.owner)
 
         self.assertEqual(second.preview_type, "image")
         self.assertEqual(second.preview_url, first.preview_url)
-        self.assertEqual(await self._watermarked_count(), 1)
+        self.assertEqual(
+            await self._watermarked_count(), min(2, settings.PREVIEW_IMAGE_MAX_PAGES)
+        )
 
     # ------------------------------------------------------------------ #
     # 开关与失败回退
@@ -281,7 +297,7 @@ class Beta11PreviewTests(unittest.IsolatedAsyncioTestCase):
         await self.db.commit()
 
         with patch.object(
-            content, "build_watermarked_preview", AsyncMock(return_value=None)
+            content, "build_watermarked_pages", AsyncMock(return_value=[])
         ):
             grant = await self._grant(self.owner)
 
@@ -331,22 +347,29 @@ class Beta11PreviewTests(unittest.IsolatedAsyncioTestCase):
     # ------------------------------------------------------------------ #
     # 边界与权限
     # ------------------------------------------------------------------ #
-    async def test_ensure_returns_none_for_anonymous_and_office_files(self):
-        # 匿名用户无法绑定用户水印，回退既有受限预览。
-        self.assertIsNone(
-            await content.ensure_watermarked_preview(
-                self.db, source_file=self.file, user=None
-            )
+    async def test_anonymous_gets_platform_watermark_and_office_is_imaged(self):
+        self._stub_storage()
+        # 匿名用户没有可绑定身份：使用固定平台水印，不退化为无水印。
+        anonymous = await content.ensure_watermarked_preview(
+            self.db, source_file=self.file, user=None
         )
-        # DOCX/PPTX 维持 LibreOffice 受限 PDF 链路，本轮不做图片化。
+        self.assertIsNotNone(anonymous)
+        self.assertIn("-anon", anonymous.storage_key)
+        self.assertEqual(anonymous.page_no, 1)
+
+        # Office 统一图片化：转换器返回 PDF 后走同一条渲染与水印链路。
+        from app.modules.content import derivatives
+
         self.file.detected_mime = DOCX_MIME
         await self.db.flush()
-        self.assertIsNone(
-            await content.ensure_watermarked_preview(
+        with patch.object(
+            derivatives, "_convert_office", lambda source, workdir: source
+        ):
+            office = await content.ensure_watermarked_preview(
                 self.db, source_file=self.file, user=self.owner
             )
-        )
-        self.assertEqual(await self._watermarked_count(), 0)
+        self.assertIsNotNone(office)
+        self.assertEqual(office.kind, DerivativeKind.WATERMARKED_PREVIEW.value)
 
     async def test_unauthorized_users_cannot_get_preview(self):
         uploaded = self._stub_storage()

@@ -59,6 +59,10 @@ PRICE_CONFIRM = "price.confirm"
 LEDGER_VIEW = "ledger.view"
 PAYOUT_MANAGE = "payout.manage"
 METRICS_VIEW = "metrics.view"
+# --- 0.0.3 主动防御（AI 对抗 §10）：诱饵、风险状态与策略维护 ---
+DEFENSE_MANAGE = "defense.manage"
+# --- 0.0.3 推荐与实验（ALLIN §21、§34）---
+RECO_MANAGE = "reco.manage"
 
 ALL_PERMISSIONS: frozenset[str] = frozenset(
     {
@@ -89,6 +93,8 @@ ALL_PERMISSIONS: frozenset[str] = frozenset(
         LEDGER_VIEW,
         PAYOUT_MANAGE,
         METRICS_VIEW,
+        DEFENSE_MANAGE,
+        RECO_MANAGE,
     }
 )
 

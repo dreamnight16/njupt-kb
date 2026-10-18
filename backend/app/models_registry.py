@@ -12,7 +12,9 @@ from app.modules.cases.models import *  # noqa: F401,F403
 from app.modules.catalog.models import *  # noqa: F401,F403
 from app.modules.commerce.models import *  # noqa: F401,F403
 from app.modules.content.models import *  # noqa: F401,F403
+from app.modules.content.guides_models import *  # noqa: F401,F403
 from app.modules.creator.models import *  # noqa: F401,F403
+from app.modules.defense.models import *  # noqa: F401,F403
 from app.modules.identity.models import *  # noqa: F401,F403
 from app.modules.interaction.models import *  # noqa: F401,F403
 from app.modules.jobs.models import *  # noqa: F401,F403
@@ -20,6 +22,7 @@ from app.modules.licensing.models import *  # noqa: F401,F403
 from app.modules.moderation.models import *  # noqa: F401,F403
 from app.modules.notification.models import *  # noqa: F401,F403
 from app.modules.ratelimit.models import *  # noqa: F401,F403
+from app.modules.reco.models import *  # noqa: F401,F403
 from app.modules.search.models import *  # noqa: F401,F403
 from app.modules.settlement.models import *  # noqa: F401,F403
 from app.modules.topics.models import *  # noqa: F401,F403

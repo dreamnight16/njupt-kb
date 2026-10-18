@@ -115,6 +115,17 @@ async def enforce(
     if limit <= 0:
         return
 
+    # 主动防御：仅 enforce 模式且该主体有未过期的临时处置时收紧额度（AI 对抗 §10.5）。
+    # 只收紧、不放宽；检测不可用或观察模式一律返回 1.0，不影响正常业务。
+    try:
+        from app.modules.defense import service as defense
+
+        factor = await defense.factor_for(db, kind=subject_kind, subject=subject)
+    except Exception:  # noqa: BLE001 - 防御不可用不得阻断限流主链路
+        factor = 1.0
+    if factor < 1.0:
+        limit = max(1, int(limit * factor))
+
     window = max(1, settings.RATE_LIMIT_WINDOW_SECONDS)
     now = _now()
     window_start = _window_start(now, window)

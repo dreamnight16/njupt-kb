@@ -31,6 +31,7 @@ from app.core.errors import (
     Conflict,
     Forbidden,
     InvalidInput,
+    NotEnabled,
     NotFound,
     RateLimited,
     Unauthenticated,
@@ -44,7 +45,14 @@ from app.core.security import (
     verify_password,
 )
 from app.db import async_session_factory
-from app.modules.identity.models import AuthToken, Session, User, UserIdentity, UserProfile
+from app.modules.identity.models import (
+    AuthToken,
+    EmailChangeRequest,
+    Session,
+    User,
+    UserIdentity,
+    UserProfile,
+)
 from app.modules.identity.schemas import ActionMessage, MeResponse, SessionItem
 
 logger = logging.getLogger("app.identity")
@@ -1232,3 +1240,177 @@ async def export_my_data(db: AsyncSession, *, user: User) -> dict:
             for row in session_rows
         ],
     }
+
+
+# --- 邮箱换绑（0.0.3）------------------------------------------------------- #
+EMAIL_CHANGE_TTL_HOURS = 2
+EMAIL_CHANGE_COOLDOWN_HOURS = 24
+
+
+async def request_email_change(
+    db: AsyncSession,
+    *,
+    user: User,
+    session: Session,
+    new_email: str,
+    password: str,
+    request_id: str | None,
+) -> ActionMessage:
+    """发起换绑：校验密码与新邮箱，向新邮箱发送确认令牌，同时告知旧邮箱。
+
+    邮件服务关闭时明确返回 NotEnabled，不假装「已发送」。同一账号 24 小时内只能发起一次，
+    防止会话被盗后反复试探；新邮箱在确认前不写入用户表。
+    """
+    if not settings.MAIL_ENABLED:
+        raise NotEnabled("邮件服务未启用，暂时不能换绑邮箱")
+
+    if not verify_password(password, user.password_hash):
+        raise InvalidInput("密码不正确")
+
+    normalized = _normalize_email(new_email)
+    if not normalized or "@" not in normalized:
+        raise InvalidInput("邮箱格式不正确")
+    if normalized == user.email:
+        raise InvalidInput("新邮箱与当前邮箱相同")
+
+    taken = (
+        await db.execute(select(User.id).where(User.email == normalized))
+    ).scalar_one_or_none()
+    if taken is not None:
+        raise Conflict("该邮箱已被其他账号使用")
+
+    now = _now()
+    recent = (
+        await db.execute(
+            select(EmailChangeRequest.id).where(
+                EmailChangeRequest.user_id == user.id,
+                EmailChangeRequest.created_at >= now - timedelta(hours=EMAIL_CHANGE_COOLDOWN_HOURS),
+            )
+        )
+    ).first()
+    if recent is not None:
+        raise RateLimited(
+            "换绑申请过于频繁，请稍后再试",
+            details={"retry_after": EMAIL_CHANGE_COOLDOWN_HOURS * 3600},
+        )
+
+    # 生产环境且已启用 MFA：换绑属于敏感操作，要求近期验证（与权限体系一致）。
+    if settings.is_prod:
+        from app.modules.identity.models import UserMFA
+        from app.modules.identity.mfa import require_recent
+
+        mfa = await db.get(UserMFA, user.id)
+        if mfa is not None and mfa.enabled_at is not None:
+            await require_recent(db, user, session)
+
+    # 作废此前未使用的换绑令牌，只保留最新一条。
+    await db.execute(
+        update(EmailChangeRequest)
+        .where(
+            EmailChangeRequest.user_id == user.id,
+            EmailChangeRequest.consumed_at.is_(None),
+            EmailChangeRequest.cancelled_at.is_(None),
+        )
+        .values(cancelled_at=now)
+        .execution_options(synchronize_session=False)
+    )
+
+    raw = generate_token()
+    db.add(
+        EmailChangeRequest(
+            user_id=user.id,
+            new_email=normalized,
+            token_digest=token_digest(raw),
+            expires_at=now + timedelta(hours=EMAIL_CHANGE_TTL_HOURS),
+        )
+    )
+    link = _verification_link("/settings/email/confirm", raw)
+    await _deliver_mail(
+        to=normalized,
+        subject="确认更换邮箱",
+        body=f"确认将账号邮箱更换为 {normalized}：{link}\n链接 {EMAIL_CHANGE_TTL_HOURS} 小时内有效。",
+        log_event="email_change_link_issued",
+        log_extra={"user_id": str(user.id), "request_id": request_id},
+    )
+    # 旧邮箱安全告知：让原持有人知道有人发起了换绑（不包含令牌）。
+    await _deliver_mail(
+        to=user.email,
+        subject="邮箱换绑申请提醒",
+        body=(
+            f"你的账号发起了更换邮箱的申请，目标邮箱为 {normalized}。\n"
+            "如果这不是你的操作，请立即修改密码并联系管理员。"
+        ),
+        log_event="email_change_notice_sent",
+        log_extra={"user_id": str(user.id), "request_id": request_id},
+    )
+    await record_audit(
+        db,
+        action="identity.email_change_requested",
+        object_type="user",
+        object_id=user.id,
+        actor_id=user.id,
+        after={"new_email_domain": normalized.split("@", 1)[-1]},
+        reason="发起邮箱换绑",
+        request_id=request_id,
+    )
+    await db.flush()
+    return ActionMessage(message="确认邮件已发送到新邮箱，请在有效期内完成确认")
+
+
+async def confirm_email_change(
+    db: AsyncSession, *, raw_token: str, request_id: str | None
+) -> ActionMessage:
+    """确认换绑：令牌一次性、有期限；成功后撤销全部会话，要求重新登录。"""
+    row = (
+        await db.execute(
+            select(EmailChangeRequest).where(
+                EmailChangeRequest.token_digest == token_digest(raw_token)
+            )
+        )
+    ).scalar_one_or_none()
+    if row is None or row.consumed_at is not None or row.cancelled_at is not None:
+        raise InvalidInput("链接无效或已被使用", code="TOKEN_INVALID")
+    if _aware(row.expires_at) <= _now():
+        raise InvalidInput("链接已过期，请重新申请", code="TOKEN_EXPIRED")
+
+    user = await db.get(User, row.user_id)
+    if user is None:
+        raise InvalidInput("链接无效或已被使用", code="TOKEN_INVALID")
+
+    taken = (
+        await db.execute(select(User.id).where(User.email == row.new_email, User.id != user.id))
+    ).scalar_one_or_none()
+    if taken is not None:
+        # 并发场景：申请后该邮箱被注册，确认失败并作废本条申请。
+        row.cancelled_at = _now()
+        raise Conflict("该邮箱已被其他账号使用，请重新申请")
+
+    previous_email = user.email
+    user.email = row.new_email
+    # 已通过链接确认持有该邮箱，视为已验证（与注册验证同源语义 §14.1）。
+    user.email_verified_at = _now()
+    row.consumed_at = _now()
+    await revoke_all_sessions(db, user.id, reason="邮箱换绑后要求重新登录")
+    await record_audit(
+        db,
+        action="identity.email_changed",
+        object_type="user",
+        object_id=user.id,
+        actor_id=user.id,
+        before={"email_domain": previous_email.split("@", 1)[-1]},
+        after={"email_domain": row.new_email.split("@", 1)[-1]},
+        reason="邮箱换绑确认",
+        request_id=request_id,
+    )
+    await _deliver_mail(
+        to=previous_email,
+        subject="邮箱已更换",
+        body=(
+            f"你的账号邮箱已更换为 {row.new_email}。\n"
+            "如果不是你本人操作，请立即联系管理员冻结账号。"
+        ),
+        log_event="email_changed_notice_sent",
+        log_extra={"user_id": str(user.id), "request_id": request_id},
+    )
+    await db.flush()
+    return ActionMessage(message="邮箱已更换，请使用新邮箱重新登录")

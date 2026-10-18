@@ -66,6 +66,7 @@ from app.modules.content.derivatives import (
     PROCESSOR_VERSION,
     DerivativeError,
     build_derivatives,
+    build_watermarked_pages,
     build_watermarked_preview,
     primary_kind,
 )
@@ -81,9 +82,11 @@ from app.modules.content.models import (
     VersionFile,
 )
 from app.modules.content.scanning import (
+    DOCX_MIME,
     JPEG_MIME,
     PDF_MIME,
     PNG_MIME,
+    PPTX_MIME,
     ScanOutcome,
     scan_quarantined_object,
 )
@@ -1474,82 +1477,156 @@ def user_short_code(user_id: uuid.UUID, *, length: int = 8) -> str:
     return digest.hexdigest()[:length].upper()
 
 
-async def ensure_watermarked_preview(
-    db: AsyncSession, *, source_file: ResourceFile, user
-) -> FileDerivative | None:
-    """为指定用户生成/复用第一页水印图片预览（prevew.md 五、十二）。
+async def _ensure_watermarked_pages(
+    db: AsyncSession,
+    *,
+    source_file: ResourceFile,
+    user,
+    max_pages: int,
+    build,
+) -> list[FileDerivative]:
+    """生成/复用前 N 页水印图片预览；失败返回空列表，由调用方回退既有预览。
 
-    - 浏览器拿到的是 page1.webp 图片而不是完整 PDF，权限隔离由服务端渲染保证。
-    - 水印按用户：同一文件不同用户是不同 FileDerivative 行（storage_key 含用户短码），
+    - 浏览器拿到的是 page1.webp…pageN.webp，权限隔离由服务端渲染保证。
+    - 登录用户的水印含本人短码：同一文件不同用户是不同 FileDerivative 行，
       不在任何公开桶放无水印原图。
-    - 开关关闭、匿名用户、DOCX/PPTX 或生成失败时返回 None，由调用方回退既有
-      preview_pdf / thumbnail 预览，不让预览链路失败。
+    - 匿名用户没有可绑定身份，使用固定平台水印并共享同一批派生对象；
+      水印同样平铺，不能靠裁剪边缘去掉。
+    - 开关关闭、格式不支持或生成失败时返回空列表，不阻断预览链路。
     """
     if not (settings.PREVIEW_IMAGE_ENABLED and settings.PREVIEW_WATERMARK_ENABLED):
-        return None
-    if user is None:
-        # 匿名用户无法绑定用户水印，回退到既有受限预览。
-        return None
-    source_file = await db.scalar(select(ResourceFile).where(ResourceFile.id == source_file.id).with_for_update().execution_options(populate_existing=True))
-    if source_file is None or source_file.scan_status != ScanStatus.PASSED.value:
-        return None
-    mime = source_file.detected_mime
-    if mime not in (PDF_MIME, PNG_MIME, JPEG_MIME):
-        # DOCX/PPTX 维持 LibreOffice 受限 PDF 链路，本轮不做图片化。
-        return None
-
-    short_code = user_short_code(user.id)
-    # 展示短码不作为所有权键，避免截断摘要碰撞后复用其他用户的水印。
-    owner_key = user_short_code(user.id, length=64)
-    existing = await db.scalar(
-        select(FileDerivative)
-        .where(
-            FileDerivative.source_file_id == source_file.id,
-            FileDerivative.kind == DerivativeKind.WATERMARKED_PREVIEW.value,
-            FileDerivative.processor_version == PROCESSOR_VERSION,
-            FileDerivative.status == DerivativeStatus.READY.value,
-            FileDerivative.storage_key.like(f"%-{owner_key}.webp"),
-        )
-        .order_by(FileDerivative.created_at.desc())
-        .limit(1)
+        return []
+    source_file = await db.scalar(
+        select(ResourceFile)
+        .where(ResourceFile.id == source_file.id)
+        .with_for_update()
+        .execution_options(populate_existing=True)
     )
-    if existing is not None:
-        # 已就绪：直接复用，不重复渲染。
-        return existing
+    if source_file is None or source_file.scan_status != ScanStatus.PASSED.value:
+        return []
+    mime = source_file.detected_mime
+    if mime not in (PDF_MIME, PNG_MIME, JPEG_MIME, DOCX_MIME, PPTX_MIME):
+        return []
 
-    watermark_text = f"U{short_code} · {_now().date().isoformat()}"
+    if user is None:
+        # 匿名：固定平台水印 + 共享对象键；不写入任何个人标识。
+        owner_key = "anon"
+        watermark_text = settings.PREVIEW_ANONYMOUS_WATERMARK
+    else:
+        short_code = user_short_code(user.id)
+        # 展示短码不作为所有权键，避免截断摘要碰撞后复用其他用户的水印。
+        owner_key = user_short_code(user.id, length=64)
+        watermark_text = f"U{short_code} · {_now().date().isoformat()}"
+
+    existing = (
+        (
+            await db.execute(
+                select(FileDerivative)
+                .where(
+                    FileDerivative.source_file_id == source_file.id,
+                    FileDerivative.kind == DerivativeKind.WATERMARKED_PREVIEW.value,
+                    FileDerivative.processor_version == PROCESSOR_VERSION,
+                    FileDerivative.status == DerivativeStatus.READY.value,
+                    FileDerivative.page_no.is_not(None),
+                    FileDerivative.storage_key.like(f"%-{owner_key}.webp"),
+                )
+                .order_by(FileDerivative.page_no)
+            )
+        )
+        .scalars()
+        .all()
+    )
+    if existing:
+        # 已就绪：直接复用，不重复渲染。
+        return list(existing)
+
     with tempfile.TemporaryDirectory(prefix="njupt-wm-preview-") as tmp:
         workdir = Path(tmp)
         source = workdir / "source"
         try:
             await _download_verified_source(source_file, source)
         except DerivativeError:
-            return None
-        artifact = await build_watermarked_preview(
-            source, detected_mime=mime, workdir=workdir, watermark_text=watermark_text
+            return []
+        artifacts = await build(
+            source,
+            detected_mime=mime,
+            workdir=workdir,
+            watermark_text=watermark_text,
+            max_pages=max_pages,
         )
-        if artifact is None:
-            return None
-        # 键含用户短码：同文件不同用户是不同对象（prevew.md 十二）。
-        derivative_key = f"derivatives/{uuid.uuid4().hex}-{owner_key}.webp"
-        with artifact.path.open("rb") as handle:
-            await storage.put_file(
-                derivative_key,
-                handle,
-                artifact.content_type,
-                bucket=settings.S3_BUCKET_PRIVATE,
+        if not artifacts:
+            return []
+        rows: list[FileDerivative] = []
+        for artifact in artifacts:
+            page_no = artifact.page_no or 1
+            # 键含用户短码与页码：同文件不同用户、不同页都是不同对象（prevew.md 十二）。
+            derivative_key = f"derivatives/{uuid.uuid4().hex}-p{page_no}-{owner_key}.webp"
+            with artifact.path.open("rb") as handle:
+                await storage.put_file(
+                    derivative_key,
+                    handle,
+                    artifact.content_type,
+                    bucket=settings.S3_BUCKET_PRIVATE,
+                )
+            row = FileDerivative(
+                source_file_id=source_file.id,
+                processor_version=PROCESSOR_VERSION,
+                kind=DerivativeKind.WATERMARKED_PREVIEW.value,
+                storage_key=derivative_key,
+                status=DerivativeStatus.READY.value,
+                page_count=artifact.page_count,
+                page_no=page_no,
             )
-    row = FileDerivative(
-        source_file_id=source_file.id,
-        processor_version=PROCESSOR_VERSION,
-        kind=DerivativeKind.WATERMARKED_PREVIEW.value,
-        storage_key=derivative_key,
-        status=DerivativeStatus.READY.value,
-        page_count=artifact.page_count,
+            db.add(row)
+            rows.append(row)
+        await db.flush()
+        return rows
+
+
+async def ensure_watermarked_preview_pages(
+    db: AsyncSession, *, source_file: ResourceFile, user
+) -> list[FileDerivative]:
+    """多页水印图片预览（PDF / 图片 / Office 统一图片化）。"""
+    return await _ensure_watermarked_pages(
+        db,
+        source_file=source_file,
+        user=user,
+        max_pages=settings.PREVIEW_IMAGE_MAX_PAGES,
+        build=build_watermarked_pages,
     )
-    db.add(row)
-    await db.flush()
-    return row
+
+
+async def ensure_watermarked_preview(
+    db: AsyncSession, *, source_file: ResourceFile, user
+) -> FileDerivative | None:
+    """兼容入口：只保证第一页水印图片（旧调用方与测试使用）。
+
+    匿名用户现在也会得到带平台水印的第一页图片；如需回退既有受限预览，
+    调用方仍按「无行则回退」处理。
+    """
+    pages = await _ensure_watermarked_pages(
+        db,
+        source_file=source_file,
+        user=user,
+        max_pages=1,
+        build=_build_single_page,
+    )
+    return pages[0] if pages else None
+
+
+async def _build_single_page(
+    source: Path,
+    *,
+    detected_mime: str,
+    workdir: Path,
+    watermark_text: str,
+    max_pages: int = 1,
+) -> list:
+    """单页构建适配：复用旧的 `build_watermarked_preview`，保持测试与回退语义。"""
+    artifact = await build_watermarked_preview(
+        source, detected_mime=detected_mime, workdir=workdir, watermark_text=watermark_text
+    )
+    return [artifact] if artifact is not None else []
 
 
 async def _download_verified_source(file: ResourceFile, destination: Path) -> None:

@@ -31,7 +31,15 @@ from app.core.enums import (
 )
 from app.db import Base, Timestamped, UUIDPrimaryKey
 
-__all__ = ["User", "UserProfile", "UserIdentity", "Session", "AuthToken", "UserMFA"]
+__all__ = [
+    "User",
+    "UserProfile",
+    "UserIdentity",
+    "Session",
+    "AuthToken",
+    "UserMFA",
+    "EmailChangeRequest",
+]
 
 
 def _enum_values(enum_cls: type[Enum]) -> str:
@@ -179,3 +187,25 @@ class AuthToken(Base, UUIDPrimaryKey, Timestamped):
     )
     consumed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     revoked_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
+
+class EmailChangeRequest(Base, UUIDPrimaryKey, Timestamped):
+    """邮箱换绑申请（0.0.3）。
+
+    双确认：必须同时持有当前密码（发起时校验）与新邮箱收到的令牌（确认时校验）。
+    只存令牌摘要，不存明文；新邮箱在确认前不写入 `users.email`。
+    """
+
+    __tablename__ = "email_change_requests"
+    __table_args__ = (
+        UniqueConstraint("token_digest", name="uq_email_change_requests_token_digest"),
+    )
+
+    user_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    new_email: Mapped[str] = mapped_column(String(320), nullable=False)
+    token_digest: Mapped[str] = mapped_column(String(64), nullable=False)
+    expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    consumed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    cancelled_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)

@@ -650,3 +650,44 @@ class CacheClass(StrEnum):
     VIEWER_SCOPED = "viewer_scoped"
     AUTH_SENSITIVE = "auth_sensitive"
     NO_CACHE = "no_cache"
+
+
+# --- 0.0.3 主动防御（AI 对抗攻击防御设计 §10）---
+class DefenseMode(StrEnum):
+    """风险处置模式。默认 observe：只记录与评估，不改变正常业务结果。"""
+
+    OFF = "off"
+    OBSERVE = "observe"
+    ENFORCE = "enforce"
+
+
+class DefenseSignalKind(StrEnum):
+    """风险信号类别。单个信号不能定性攻击，只作为评分输入（§10.4）。"""
+
+    HONEYPOT_HIT = "honeypot_hit"
+    HONEYTOKEN_HIT = "honeytoken_hit"
+    ENUMERATION = "enumeration"
+    BOUNDARY_PROBE = "boundary_probe"
+    PARAM_SWEEP = "param_sweep"
+    DEEP_PAGINATION = "deep_pagination"
+    RATE_PRESSURE = "rate_pressure"
+
+
+class RiskLevel(StrEnum):
+    NORMAL = "normal"
+    SUSPICIOUS = "suspicious"
+    HIGH = "high"
+
+
+class RiskAction(StrEnum):
+    """处置动作。全部有有效期，可撤销；不放宽任何固定硬配额（§10.5）。"""
+
+    OBSERVE = "observe"
+    THROTTLE = "throttle"
+    CHALLENGE = "challenge"
+    REVIEW = "review"
+
+
+class HoneytokenStatus(StrEnum):
+    ACTIVE = "active"
+    RETIRED = "retired"

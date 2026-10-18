@@ -122,7 +122,10 @@ from app.modules.cases.router import router as cases_router  # noqa: E402
 from app.modules.catalog.router import router as catalog_router  # noqa: E402
 from app.modules.commerce.router import router as commerce_router  # noqa: E402
 from app.modules.content.router import router as content_router  # noqa: E402
+from app.modules.content.guides_router import router as guides_router  # noqa: E402
 from app.modules.creator.router import router as creator_router  # noqa: E402
+from app.modules.defense.router import honeypot_handler  # noqa: E402
+from app.modules.defense.router import router as defense_router  # noqa: E402
 from app.modules.identity.router import router as identity_router  # noqa: E402
 from app.modules.identity.mfa_router import router as mfa_router  # noqa: E402
 from app.modules.interaction.router import router as interaction_router  # noqa: E402
@@ -131,6 +134,7 @@ from app.modules.licensing.router import router as licensing_router  # noqa: E40
 from app.modules.moderation.router import router as moderation_router  # noqa: E402
 from app.modules.notification.router import router as notification_router  # noqa: E402
 from app.modules.ops.router import router as ops_router  # noqa: E402
+from app.modules.reco.router import router as reco_router  # noqa: E402
 from app.modules.search.router import router as search_router  # noqa: E402
 from app.modules.settlement.router import router as settlement_router  # noqa: E402
 from app.modules.topics.router import router as topics_router  # noqa: E402
@@ -142,6 +146,7 @@ for _router in (
     mfa_router,
     catalog_router,
     content_router,
+    guides_router,
     moderation_router,
     access_router,
     interaction_router,
@@ -154,7 +159,22 @@ for _router in (
     cases_router,
     ai_router,
     topics_router,
+    defense_router,
+    reco_router,
     ops_router,
     settlement_router,
 ):
     app.include_router(_router, prefix=settings.API_PREFIX)
+
+
+# 蜜罐路径按配置单独注册：不进入 OpenAPI、不在正常导航出现，响应固定且无业务能力。
+# 若配置值与真实路由同路径，启动即失败，避免误把真实接口变成诱饵。
+if settings.HONEYPOT_ENABLED:
+    if any(getattr(route, "path", None) == settings.HONEYPOT_PATH for route in app.routes):
+        raise RuntimeError(f"蜜罐路径与既有路由冲突: {settings.HONEYPOT_PATH}")
+    app.add_api_route(
+        settings.HONEYPOT_PATH,
+        honeypot_handler,
+        methods=["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
+        include_in_schema=False,
+    )

@@ -29,6 +29,8 @@ from app.modules.identity.schemas import (
     ActionMessage,
     CsrfResponse,
     DeletionRequest,
+    EmailChangeConfirmRequest,
+    EmailChangeRequestDTO,
     EmailVerificationConfirmRequest,
     EmailVerificationRequest,
     LoginRequest,
@@ -291,6 +293,40 @@ async def change_password(
         new_password=payload.new_password,
         request_id=request_id,
     )
+
+
+@router.post("/me/email", response_model=ActionMessage)
+async def request_email_change(
+    payload: EmailChangeRequestDTO,
+    user: User = Depends(get_current_user),
+    session: Session = Depends(current_session),
+    db: AsyncSession = Depends(get_db),
+    request_id: str = Depends(get_request_id),
+    _rl: None = Depends(rate_limit("login")),
+) -> ActionMessage:
+    """发起邮箱换绑：校验当前密码后向新邮箱发送确认令牌（§21 双确认）。"""
+    result = await service.request_email_change(
+        db,
+        user=user,
+        session=session,
+        new_email=str(payload.new_email),
+        password=payload.password,
+        request_id=request_id,
+    )
+    return ActionMessage(message=result.message, mail_sent=settings.MAIL_ENABLED)
+
+
+@router.post("/me/email/confirm", response_model=ActionMessage)
+async def confirm_email_change(
+    payload: EmailChangeConfirmRequest,
+    db: AsyncSession = Depends(get_db),
+    request_id: str = Depends(get_request_id),
+) -> ActionMessage:
+    """确认邮箱换绑：令牌一次性、有时效；成功后撤销全部会话（§21）。"""
+    result = await service.confirm_email_change(
+        db, raw_token=payload.token, request_id=request_id
+    )
+    return ActionMessage(message=result.message)
 
 
 @router.post("/me/sessions/revoke-others", response_model=ActionMessage)

@@ -31,6 +31,9 @@ SESSIONLESS_PATHS = {
     f"{settings.API_PREFIX}/auth/password-resets",
     f"{settings.API_PREFIX}/auth/password-resets/confirm",
     f"{settings.API_PREFIX}/auth/csrf",
+    # 浏览器自动上报的 CSP 违规报告没有页面上下文，无法携带 CSRF 令牌；
+    # 该端点只写日志、限体积、按来源限流，不读写业务数据。
+    f"{settings.API_PREFIX}/csp/reports",
 }
 
 # 支付渠道的服务端回调没有浏览器会话，也没有来源头；它的安全边界是验签（§24.3），

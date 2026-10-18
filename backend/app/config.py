@@ -106,11 +106,22 @@ class Settings(BaseSettings):
     MAX_ARCHIVE_ENTRIES: int = Field(default=2000, ge=1)
     MAX_ARCHIVE_UNPACKED_BYTES: int = Field(default=250 * 1024 * 1024, ge=1)
 
+    # --- 解析沙箱与网络出口隔离（补充规范 S04、wenjian.md 解析隔离）---
+    # off / best-effort / required。默认 best-effort：能隔离就隔离，不能则记录原因；
+    # required 时没有网络隔离会拒绝转换，由派生记录如实标记失败。
+    PARSE_SANDBOX_MODE: Literal["off", "best-effort", "required"] = "best-effort"
+    PARSE_SANDBOX_MEMORY_MB: int = Field(default=1024, ge=128)
+    PARSE_SANDBOX_MAX_OUTPUT_MB: int = Field(default=512, ge=16)
+
     # --- beta11 第一页图片预览与用户水印（prevew.md）---
     # 图片预览默认只渲染第一页：浏览器拿到的是 page1.webp，不是完整 PDF（prevew.md 五）。
     PREVIEW_IMAGE_ENABLED: bool = True
     PREVIEW_IMAGE_WIDTH: int = 1200
     PREVIEW_IMAGE_QUALITY: int = 82
+    # 多页图片预览：只渲染前 N 页，避免把整份文档图片化；Office 也走同一链路。
+    PREVIEW_IMAGE_MAX_PAGES: int = Field(default=3, ge=1, le=20)
+    # 匿名预览水印：匿名用户没有可绑定身份，用固定平台水印并单独限流，不退化为无水印。
+    PREVIEW_ANONYMOUS_WATERMARK: str = "访客预览 · 南邮课程知识平台"
     # 水印低可见度但可追溯：斜向重复「用户短码 + 日期」，不用破坏阅读的大水印（prevew.md 十二）。
     PREVIEW_WATERMARK_ENABLED: bool = True
     PREVIEW_WATERMARK_OPACITY: int = 28  # 0-255，Alpha 通道
@@ -229,6 +240,36 @@ class Settings(BaseSettings):
     NOTIFICATION_STREAM_HEARTBEAT_SECONDS: int = Field(default=25, ge=5, le=60)
     NOTIFICATION_STREAM_MAX_SECONDS: int = Field(default=300, ge=10, le=1800)
     NOTIFICATION_STREAM_MAX_CONNECTIONS: int = Field(default=500, ge=1)
+
+    # --- 0.0.3 主动防御（AI 对抗攻击防御设计 §10.2—§10.6）---
+    # 默认 observe：只记录信号、计算风险并留痕，不改变正常请求结果；enforce 才临时收紧限流。
+    # 处置一律有有效期、可撤销，且绝不放宽既有固定硬配额。
+    DEFENSE_ENABLED: bool = True
+    DEFENSE_MODE: Literal["off", "observe", "enforce"] = "observe"
+    DEFENSE_WINDOW_SECONDS: int = Field(default=900, ge=60)
+    DEFENSE_DECAY_HALF_LIFE_SECONDS: int = Field(default=900, ge=60)
+    DEFENSE_SUSPICIOUS_SCORE: float = Field(default=30.0, gt=0)
+    DEFENSE_HIGH_SCORE: float = Field(default=70.0, gt=0)
+    DEFENSE_THROTTLE_FACTOR_SUSPICIOUS: float = Field(default=0.5, gt=0, le=1)
+    DEFENSE_THROTTLE_FACTOR_HIGH: float = Field(default=0.25, gt=0, le=1)
+    DEFENSE_ACTION_TTL_SECONDS: int = Field(default=900, ge=60)
+    # 单主体单窗口事件上限：超出后只累计计数、不再逐条落库，避免告警风暴拖垮平台（§10.5）。
+    DEFENSE_MAX_EVENTS_PER_SUBJECT_WINDOW: int = Field(default=20, ge=1)
+    DEFENSE_EVENT_RETENTION_DAYS: int = Field(default=30, ge=1)
+    # 蜜罐只注册固定路径，响应固定且无业务能力；不进入 OpenAPI、站点地图与导航。
+    HONEYPOT_ENABLED: bool = True
+    HONEYPOT_PATH: str = "/api/internal/debug-export"
+    HONEYPOT_MAX_BODY_BYTES: int = Field(default=2048, ge=0)
+    HONEYPOT_MAX_EVENTS_PER_MINUTE: int = Field(default=60, ge=1)
+
+    # --- 0.0.3 学习行为与推荐（yonghu.md、ALLIN §21/§34）---
+    # 采集只记录行为类型、对象、位置、停留分档与进度，不记录正文、输入、IP 或 UA；
+    # 用户可在「学习记录」页关闭；保留期到期由清理任务删除。
+    BEHAVIOR_COLLECT_ENABLED: bool = True
+    BEHAVIOR_RETENTION_DAYS: int = Field(default=180, ge=1)
+    RECO_ENABLED: bool = True
+    RECO_DEFAULT_LIMIT: int = Field(default=12, ge=1, le=30)
+    RECO_TRAIN_MIN_SAMPLES: int = Field(default=50, ge=10)
 
     # --- 邮件（§21：仅用于验证与找回密码）---
     MAIL_ENABLED: bool = False

@@ -52,6 +52,7 @@ from app.modules.access.schemas import (
     EntitlementCreate,
     EntitlementOut,
     PreviewGrantResult,
+    PreviewPageOut,
 )
 from app.db import async_session_factory
 
@@ -202,7 +203,11 @@ async def issue_preview_grant(
         db, user=user, resource_id=resource_id, version_id=version_id, capability=Capability.PREVIEW
     )
 
-    from app.modules.content.service import ensure_watermarked_preview, get_resource, get_version
+    from app.modules.content.service import (
+        ensure_watermarked_preview_pages,
+        get_resource,
+        get_version,
+    )
 
     version = await get_version(db, version_id)
     if version.preview_disabled:
@@ -211,17 +216,32 @@ async def issue_preview_grant(
 
     from app.core.errors import DependencyUnavailable
 
+    pages: list[PreviewPageOut] = []
     try:
-        watermarked = await ensure_watermarked_preview(db, source_file=resource_file, user=user)
+        watermarked_pages = await ensure_watermarked_preview_pages(
+            db, source_file=resource_file, user=user
+        )
     except (DependencyUnavailable, NotFound, OSError):
         # 原件读取/派生上传失败时仍可使用已经就绪的受限预览。
-        watermarked = None
-    if watermarked is not None:
+        watermarked_pages = []
+    if watermarked_pages:
         derivative_id, storage_key, preview_type = (
-            watermarked.id,
-            watermarked.storage_key,
+            watermarked_pages[0].id,
+            watermarked_pages[0].storage_key,
             "image",
         )
+        # 每页单独签发短期 URL：一页的 URL 不能用于取其他页。
+        for row in watermarked_pages:
+            page_signed = await storage.presign_preview_download(
+                row.storage_key, bucket=settings.S3_BUCKET_PRIVATE
+            )
+            pages.append(
+                PreviewPageOut(
+                    page_no=int(row.page_no or 1),
+                    url=page_signed.url,
+                    url_expires_at=page_signed.expires_at,
+                )
+            )
     else:
         found = await _find_preview_derivative(db, source_file_id=resource_file.id)
         if found is None:
@@ -268,6 +288,8 @@ async def issue_preview_grant(
         version_no=version.version_no,
         preview_type=preview_type,
         watermark_token=watermark_token,
+        pages=pages,
+        watermarked=bool(pages),
     )
 
 

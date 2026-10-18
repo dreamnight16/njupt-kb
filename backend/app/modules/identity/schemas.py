@@ -47,6 +47,19 @@ class PasswordChangeRequest(BaseModel):
     new_password: str = Field(min_length=1, max_length=300)
 
 
+class EmailChangeRequestDTO(BaseModel):
+    """发起邮箱换绑：需当前密码确认，确认链接发往新邮箱（0.0.3）。"""
+
+    new_email: EmailStr
+    password: str = Field(min_length=1, max_length=300)
+
+
+class EmailChangeConfirmRequest(BaseModel):
+    """确认邮箱换绑：令牌一次性、有时效，确认后旧会话全部失效。"""
+
+    token: str = Field(min_length=1)
+
+
 class PasswordResetRequest(BaseModel):
     email: EmailStr
 
