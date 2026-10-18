@@ -28,16 +28,16 @@ export default function BaoyanSubmitPage() {
   });
 
   const colleges = useQuery({ queryKey: ['colleges'], queryFn: listColleges });
-  const majors = useQuery({ queryKey: ['majors'], queryFn: listMajors });
+  const majors = useQuery({
+    queryKey: ['majors', collegeId],
+    queryFn: () => listMajors(collegeId || undefined),
+    enabled: !!collegeId,
+  });
 
   useEffect(() => {
-    // 学院变化后清空不再属于该学院的专业，避免提交错配。
+    // 学院变化后清空专业，避免提交错配。
     setMajorId('');
   }, [collegeId]);
-
-  const filteredMajors = (majors.data ?? []).filter(
-    (item) => !collegeId || !item.college_id || item.college_id === collegeId,
-  );
 
   const mutation = useMutation({
     mutationFn: () =>
@@ -113,7 +113,7 @@ export default function BaoyanSubmitPage() {
             disabled={!collegeId}
           >
             <option value="">{collegeId ? '请选择专业' : '请先选择学院'}</option>
-            {filteredMajors.map((item) => (
+            {(majors.data ?? []).map((item) => (
               <option key={item.id} value={item.id}>{item.name}</option>
             ))}
           </select>

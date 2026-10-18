@@ -221,7 +221,9 @@ export async function listColleges(): Promise<CollegeBrief[]> {
   return data;
 }
 
-export async function listMajors(): Promise<MajorBrief[]> {
-  const { data } = await api.get<MajorBrief[]>('/majors');
+export async function listMajors(collegeId?: string): Promise<MajorBrief[]> {
+  const { data } = await api.get<MajorBrief[]>('/majors', {
+    params: { college_id: collegeId || undefined },
+  });
   return data;
 }
