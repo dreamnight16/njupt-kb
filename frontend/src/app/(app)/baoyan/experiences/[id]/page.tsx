@@ -72,12 +72,9 @@ export default async function BaoyanExperiencePage({ params }: { params: Promise
       )}
 
       {sections.every((section) => !section.body) && (
-        <Notice tone="info" title="正文尚未填写">该经验帖只有基本信息，没有可阅读的经历描述。</Notice>
+        <Notice tone="info" title="正文尚未填写" />
       )}
 
-      <Notice tone="warning" title="请注意时效">
-        招生政策、考核形式与名额每年可能变化。经验帖只代表作者当年的个人经历，不能替代当年官方文件。
-      </Notice>
     </article>
   );
 }

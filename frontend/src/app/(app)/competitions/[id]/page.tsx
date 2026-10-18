@@ -87,7 +87,7 @@ export default async function CompetitionDetailPage({ params }: { params: Promis
       <section aria-labelledby="competition-winners" className="space-y-3">
         <h2 id="competition-winners" className="text-xl font-semibold">本校获奖记录</h2>
         {winners.length === 0 ? (
-          <Notice tone="info" title="还没有获奖记录">获奖信息需要按年份与奖项录入并核对。</Notice>
+          <Notice tone="info" title="还没有获奖记录" />
         ) : (
           <ul className="divide-y divide-divider border border-divider bg-surface">
             {winners.map((winner) => (
@@ -109,9 +109,7 @@ export default async function CompetitionDetailPage({ params }: { params: Promis
         )}
       </section>
 
-      <Notice tone="info" title="使用边界">
-        报名条件、赛程与获奖认定以主办方和学校通知为准；本站整理可能滞后。
-      </Notice>
+      <p className="text-xs text-text-secondary">报名条件与赛程以官方通知为准。</p>
     </div>
   );
 }

@@ -29,8 +29,8 @@ export default function BaoyanReviewPage() {
   if (!canReview) return <Notice tone="warning" title="需要审核权限">请使用具有内容审核权限的账号访问。</Notice>;
   return <section className="space-y-4">
     <h2 className="dn-display text-2xl">保研经验审核</h2>
-    <p className="text-sm text-text-secondary">先审核再公开。请检查个人信息、内容来源和表述；不能审核自己的经验帖。</p>
-    {query.isLoading ? <SkeletonList /> : query.isError ? <Notice tone="error" title="审核队列无法加载">{describeError(query.error).message}<Button variant="secondary" onClick={() => void query.refetch()}>重试</Button></Notice> : query.data?.length === 0 ? <Notice title="没有待审经验帖">新提交的经验帖会出现在这里。</Notice> : <ul className="space-y-4">
+    <p className="text-sm text-text-secondary">请核对内容来源，并检查是否含有个人信息。</p>
+    {query.isLoading ? <SkeletonList /> : query.isError ? <Notice tone="error" title="审核队列无法加载">{describeError(query.error).message}<Button variant="secondary" onClick={() => void query.refetch()}>重试</Button></Notice> : query.data?.length === 0 ? <Notice title="没有待审经验帖" /> : <ul className="space-y-4">
       {query.data?.map((item) => <li key={item.id} className="space-y-3 border border-divider bg-surface p-4">
         <h3 className="font-semibold">{item.year} · {item.target_university}</h3>
         <p className="text-sm text-text-secondary">{colleges.data?.find((row) => row.id === item.college_id)?.name ?? item.college_id} · {majors.data?.find((row) => row.id === item.major_id)?.name ?? item.major_id}</p>

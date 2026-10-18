@@ -75,7 +75,7 @@ export default function BaoyanSubmitPage() {
         <Link href="/baoyan" className="text-sm text-brand underline underline-offset-2">返回保研专题</Link>
         <h1 className="dn-display mt-4 text-3xl">分享保研经验</h1>
         <p className="mt-3 text-text-secondary">
-          写清楚时间线、考核形式与自己的准备过程，比只写结论更有帮助。提交后进入审核，通过后公开。
+          审核通过后公开。
         </p>
       </header>
 

@@ -28,10 +28,6 @@ export default async function CompetitionsPage({
       <header className="border-b border-divider pb-6">
         <p className="text-sm text-text-secondary">学科竞赛 / 获奖记录</p>
         <h1 className="dn-display mt-2 text-3xl">竞赛专题</h1>
-        <p className="mt-3 max-w-3xl text-text-secondary">
-          竞赛信息按「主办方 + 时间窗口 + 适用专业」记录。报名时间与规则以官方通知为准，
-          本站只做整理与经验汇总。
-        </p>
         <div className="mt-4 flex flex-wrap gap-2">
           <Link href="/search?q=竞赛" className="inline-flex min-h-11 items-center bg-brand px-4 text-sm font-medium text-on-color">
             找竞赛资料
@@ -69,9 +65,7 @@ export default async function CompetitionsPage({
       {result.error ? (
         <Notice tone="warning" title="竞赛暂时无法加载">{result.error.message}</Notice>
       ) : items.length === 0 ? (
-        <Notice tone="info" title="还没有竞赛记录">
-          竞赛条目由管理员按来源录入；没有记录时不展示未经核实的信息。
-        </Notice>
+        <Notice tone="info" title="还没有竞赛记录" />
       ) : (
         <ul className="grid gap-4 sm:grid-cols-2">
           {items.map((item) => (
@@ -105,9 +99,6 @@ export default async function CompetitionsPage({
         </ul>
       )}
 
-      <Notice tone="info" title="使用边界">
-        报名截止、参赛资格与获奖认定以主办方与学校通知为准。本站记录可能滞后，请勿只依据本站安排报名。
-      </Notice>
     </div>
   );
 }

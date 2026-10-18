@@ -16,21 +16,26 @@ export async function Recommendations({ courseId }: { courseId?: string }) {
           <Notice tone="warning" title="推荐暂时无法加载">可以继续浏览课程或搜索资料。</Notice>
         ) : result.data && result.data.items.length > 0 ? (
           <ul className="dn-stagger grid gap-4 sm:grid-cols-2">
-            {result.data.items.map((item) => (
+            {result.data.items.map((item) => {
+              const reasons = item.reasons.filter((reason) =>
+                !(item.freshness_status === 'current' && reason === '现行内容'),
+              );
+              return (
               <li key={item.resource_id}>
                 <ResourceCard resourceId={item.resource_id} title={item.title}
                   resourceType={item.resource_type} courseName={item.course?.name}
                   courseCode={item.course?.code} freshness={item.freshness_status} rating={item.rating} />
-                <p className="mt-2 flex flex-wrap items-center gap-2 text-xs text-text-secondary">
+                {(item.explore || reasons.length > 0) && <p className="mt-2 flex flex-wrap items-center gap-2 text-xs text-text-secondary">
                   {item.explore && (
                     <span className="border border-control-border px-1.5 py-0.5 text-[0.6875rem] font-semibold text-text-primary">
                       探索位
                     </span>
                   )}
-                  <span>{item.reasons.join(' · ')}</span>
-                </p>
+                  {reasons.length > 0 && <span>{reasons.join(' · ')}</span>}
+                </p>}
               </li>
-            ))}
+              );
+            })}
           </ul>
         ) : (
           <Notice tone="info" title="暂时没有可推荐的资料">可以继续浏览课程或搜索资料。</Notice>
