@@ -17,7 +17,7 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
       </main>
       <footer className="border-t border-divider bg-surface">
         <div className="mx-auto flex max-w-6xl flex-col gap-3 px-4 py-8 text-sm text-text-secondary md:flex-row md:items-center md:justify-between">
-          <p>南邮课程知识平台 · 以课程组织可追溯的学习内容</p>
+          <p>南邮课程知识平台</p>
           <nav aria-label="页脚导航" className="flex flex-wrap gap-x-4 gap-y-2">
             <Link href="/courses" className="underline underline-offset-2 hover:text-text-primary">
               课程

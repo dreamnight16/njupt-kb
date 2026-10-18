@@ -8,8 +8,8 @@ export async function Recommendations({ courseId }: { courseId?: string }) {
     `/recommendations?limit=6${courseId ? `&course_id=${courseId}` : ''}`,
   );
   return (
-    <section aria-label={courseId ? '这门课值得看看' : '值得看看'}>
-      <h2 className="dn-display text-2xl">{courseId ? '这门课值得看看' : '值得看看'}</h2>
+    <section aria-label={courseId ? '课程推荐资料' : '推荐资料'}>
+      <h2 className="dn-display text-2xl">{courseId ? '课程推荐资料' : '推荐资料'}</h2>
       <div className="mt-4">
         {result.error ? (
           <Notice tone="warning" title="推荐暂时无法加载">可以继续浏览课程或搜索资料。</Notice>

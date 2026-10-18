@@ -24,21 +24,21 @@ export function PersonalOverview() {
   const query = useQuery({ queryKey: ['personal-overview', user?.id], queryFn: getPersonalOverview, enabled: !!user });
   const data = query.data;
   const tasks = data ? [
-    { href: '/me/resources', label: '继续编辑草稿', count: data.drafts },
-    { href: '/me/resources', label: '查看待审核版本', count: data.pending_reviews },
-    { href: '/me/notifications', label: '阅读未读通知', count: data.unread_notifications },
-    { href: '/me/resources', label: '跟进求资料与纠错', count: data.open_requests + data.open_corrections },
+    { href: '/me/resources', label: '草稿', count: data.drafts },
+    { href: '/me/resources', label: '待审核版本', count: data.pending_reviews },
+    { href: '/me/notifications', label: '未读通知', count: data.unread_notifications },
+    { href: '/me/resources', label: '求资料与纠错', count: data.open_requests + data.open_corrections },
   ] : [];
   return <div className="space-y-8">
-    <header className="flex flex-wrap items-end justify-between gap-3"><h2 className="dn-display text-2xl">{user?.display_name}，欢迎回来</h2><Link href="/upload" className="bg-brand px-5 py-3 text-sm text-on-color">分享资料</Link></header>
+    <header className="flex flex-wrap items-end justify-between gap-3"><h2 className="dn-display text-2xl">{user?.display_name}，欢迎回来</h2><Link href="/upload" className="bg-brand px-5 py-3 text-sm text-on-color">上传资料</Link></header>
     <QueryFeedback pending={query.isPending} error={query.error} empty={false} retry={() => query.refetch()} />
     {data && <>
       <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">{[
         ['/me/resources', '我的资料', data.resources], ['/me/favorites', '收藏', data.favorites],
         ['/me/follows', '关注', data.follows], ['/me/downloads', '下载记录', data.downloads],
       ].map(([href, label, count]) => <Link key={href} href={String(href)} className="border border-divider bg-surface p-5 hover:border-brand"><p className="text-sm text-text-secondary">{label}</p><p className="dn-display mt-2 text-3xl">{count}</p></Link>)}</div>
-      <section className="space-y-3"><h3 className="dn-display text-xl">继续处理</h3><ul className="divide-y divide-divider border border-divider">{tasks.map(item => <li key={item.label}><Link href={item.href} className="flex min-h-14 items-center justify-between gap-4 px-4 hover:bg-canvas"><span>{item.label}</span><span className="font-semibold">{item.count}</span></Link></li>)}</ul></section>
-      <div className="grid gap-4 md:grid-cols-2"><Link href="/me/feed" className="border border-divider p-5"><h3 className="text-lg font-semibold">关注动态 →</h3><p className="mt-2 text-sm text-text-secondary">查看关注课程与创作者的已发布资料。</p></Link><Link href="/me/downloads" className="border border-divider p-5"><h3 className="text-lg font-semibold">下载历史 →</h3><p className="mt-2 text-sm text-text-secondary">查找以前使用的资料与版本。</p></Link></div>
+      <section className="space-y-3"><h3 className="dn-display text-xl">待办事项</h3><ul className="divide-y divide-divider border border-divider">{tasks.map(item => <li key={item.label}><Link href={item.href} className="flex min-h-14 items-center justify-between gap-4 px-4 hover:bg-canvas"><span>{item.label}</span><span className="font-semibold">{item.count}</span></Link></li>)}</ul></section>
+      <div className="grid gap-4 md:grid-cols-2"><Link href="/me/feed" className="border border-divider p-5"><h3 className="text-lg font-semibold">关注动态 →</h3></Link><Link href="/me/downloads" className="border border-divider p-5"><h3 className="text-lg font-semibold">下载记录 →</h3></Link></div>
     </>}
     <CreatorStats />
   </div>;

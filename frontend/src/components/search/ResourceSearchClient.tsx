@@ -189,7 +189,7 @@ function ResourceSearchResults() {
             href={q ? `/requests?new=1&keyword=${encodeURIComponent(q)}` : '/requests?new=1'}
             className="mt-2 inline-flex min-h-11 items-center underline"
           >
-            没找到？发起求资料
+            求资料
           </Link>
         </Notice>
       ) : (

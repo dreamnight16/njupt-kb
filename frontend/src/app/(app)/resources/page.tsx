@@ -23,12 +23,6 @@ const SORT_LABELS: Record<ResourceSort, string> = {
   hot: '热门',
 };
 
-const SORT_HINTS: Record<ResourceSort, string> = {
-  latest: '按更新时间从新到旧。',
-  oldest: '按更新时间从旧到新。',
-  hot: '按互动量（收藏与下载）随时间衰减的热门分；越新的内容热度衰减越慢。',
-};
-
 type ResourcesSearchParams = Partial<Record<'sort' | 'course_id' | 'keyword' | 'resource_type' | 'cursor', string | string[]>>;
 
 function buildQuery(params: Record<string, string | undefined>): string {
@@ -87,11 +81,7 @@ export default async function ResourcesPage({
   return (
     <div className="space-y-6">
       <header className="bg-ink px-6 py-8 text-on-ink">
-        <p className="dn-kicker">RESOURCES</p>
-        <h1 className="dn-display mt-2 text-3xl">资料</h1>
-        <p className="mt-2 max-w-2xl text-on-ink">
-          仅展示已发布且当前版本已通过审核的资料。
-        </p>
+        <h1 className="dn-display text-3xl">资料</h1>
       </header>
 
       <form action="/resources" className="grid gap-3 border border-divider bg-surface p-4 sm:grid-cols-[1fr_auto_auto]">
@@ -131,7 +121,6 @@ export default async function ResourcesPage({
             </Link>
           ))}
         </div>
-        <p className="text-xs text-text-secondary">{SORT_HINTS[sort]}</p>
       </div>
 
       {listResult.error ? (

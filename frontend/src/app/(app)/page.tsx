@@ -27,9 +27,8 @@ export default async function HomePage() {
   return (
     <div className="space-y-10">
       <section className="bg-brand px-6 py-6 text-on-color md:px-10 md:py-8">
-        <p className="dn-kicker">NJUPT COURSE KNOWLEDGE</p>
-        <h1 className="dn-display mt-3 max-w-2xl text-3xl md:text-4xl">
-          找到这门课需要的资料
+        <h1 className="dn-display max-w-2xl text-3xl md:text-4xl">
+          课程资料
         </h1>
         <div className="mt-6 max-w-2xl">
           <SearchBox size="lg" />
@@ -39,27 +38,26 @@ export default async function HomePage() {
             href="/courses"
             className="inline-flex min-h-11 items-center bg-on-color/15 px-4 text-sm font-medium text-on-color hover:bg-on-color/25"
           >
-            浏览全部课程
+            全部课程
           </Link>
           <Link
             href="/requests?new=1"
             className="inline-flex min-h-11 items-center border border-on-color/40 px-4 text-sm font-medium text-on-color hover:bg-on-color/10"
           >
-            没找到？求资料
+            求资料
           </Link>
         </div>
       </section>
 
       <nav aria-label="常用操作" className="grid grid-cols-2 gap-3 sm:grid-cols-4">
         {[
-          ['/me/favorites', '我的收藏', '继续阅读已收藏的资料'],
-          ['/me/follows', '我的关注', '查看关注的课程和需求'],
-          ['/upload', '上传资料', '分享笔记、试卷与课件'],
-          ['/me/resources', '我的资料', '继续草稿、查看审核进度'],
-        ].map(([href, title, hint]) => (
+          ['/me/favorites', '我的收藏'],
+          ['/me/follows', '我的关注'],
+          ['/upload', '上传资料'],
+          ['/me/resources', '我的资料'],
+        ].map(([href, title]) => (
           <Link key={href} href={href} className="border border-divider bg-surface p-4 hover:bg-canvas">
             <span className="font-medium text-text-primary">{title}</span>
-            <span className="mt-1 block text-xs text-text-secondary">{hint}</span>
           </Link>
         ))}
       </nav>
@@ -67,9 +65,8 @@ export default async function HomePage() {
       <section aria-labelledby="recent-courses">
         <div className="mb-4 flex items-end justify-between gap-4">
           <div>
-            <p className="dn-kicker text-text-secondary">COURSES</p>
             <h2 id="recent-courses" className="dn-display text-2xl">
-              课程入口
+              课程
             </h2>
           </div>
           <Link href="/courses" className="text-sm text-text-secondary underline underline-offset-2">
@@ -99,19 +96,18 @@ export default async function HomePage() {
       <section aria-labelledby="recent-resources">
         <div className="mb-4 flex items-end justify-between gap-4">
           <div>
-            <p className="dn-kicker text-text-secondary">RECENT</p>
             <h2 id="recent-resources" className="dn-display text-2xl">
-              近期内容
+              最新资料
             </h2>
           </div>
           <Link href="/resources" className="text-sm text-text-secondary underline underline-offset-2">
-            更多结果
+            全部资料
           </Link>
         </div>
 
         {recentResult.error ? (
-          <Notice tone="warning" title="近期内容暂时无法加载">
-            {recentResult.error.message}。这不表示没有资料。
+          <Notice tone="warning" title="最新资料暂时无法加载">
+            {recentResult.error.message}。请稍后重试。
           </Notice>
         ) : recentResult.data && recentResult.data.items.length > 0 ? (
           <div className="dn-stagger grid gap-4 sm:grid-cols-2">
